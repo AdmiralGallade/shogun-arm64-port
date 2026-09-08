@@ -143,14 +143,45 @@ cast; and eight events carry a `name_hash` of 0 with a `where` field outside the
 playfield, which lines up with `BH_RegisterPartitionCustomEventCallback` -- they
 are almost certainly scripted events rather than spawns.
 
+### Reading it back as names
+
+Events name their entity by hash, and the names live in the pack -- but every
+`BH_Load*` takes the name in `r1` and hashes it as its first act, so watching
+those three functions captures exactly the cast a level refers to. The hashes
+come from the engine's own `UE_GetHashFromString`, which is
+`h = h*65599 + tolower(c)` with `\` normalised to `/` -- classic sdbm -- but
+calling the export is safer than reimplementing it.
+
+One run over the volcano level captured **215 names** and resolved
+**155 of 172 events**:
+
+```
+timeline 'worlds/volcano/scripts/volcano.world': 155/172 events named
+  t=75    where=112  flags=0x0   worlds\ocean\scriptsadguy01c
+  t=78    where=108  flags=0x20  worlds\ocean\scriptsadguy01c
+  t=78    where=116  flags=0x20  worlds\ocean\scriptsadguy01c
+  t=81    where=104  flags=0x40  worlds\ocean\scriptsadguy01c
+  t=81    where=120  flags=0x40  worlds\ocean\scriptsadguy01c
+  t=81    where=128  flags=0x0   worlds\ocean\scriptsadguy02
+```
+
+That is a **V formation**, authored by hand: one enemy at x=112, then a
+symmetric pair at 108/116 three ticks later, then a wider pair at 104/120.
+`where` is the spawn x, and `flags` varies with position within the formation,
+so it is a movement or path variant rather than a bitfield of properties.
+
+Entity names are full asset paths. Bullet patterns live under
+`common/bullets/scripts/` (`arrow`, `ball_homing`, `laser_low_target`,
+`randomcone`, `suicide`), and levels freely reuse each other's enemies -- the
+volcano timeline is full of `worlds/ocean/scripts/badguy01c`.
+
 ### What is still unknown
 
-- **Hash to name.** `UE_GetHashFromString` is exported, so candidate names can
-  be hashed and matched, but the names themselves live in the pack. Hooking the
-  `"BH: Loading %s.badguy..."` path would capture a level's cast as it loads.
-- Whether `where` is purely an x coordinate; it is for ordinary spawns, but the
-  custom events use it for something else.
-- Whether a partition can reference an entity the pack does not contain.
+- The 17 unresolved events are the zero-hash custom events plus anything loaded
+  before the watches were installed.
+- Whether a partition can reference an entity the pack does not contain, which
+  decides whether new *arrangements* of existing enemies are easier than new
+  enemies.
 
 ### Why this is tractable
 

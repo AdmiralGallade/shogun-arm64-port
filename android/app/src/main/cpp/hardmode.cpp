@@ -28,6 +28,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -111,6 +112,13 @@ const char* kInitWorldFile = "_Z13InitWorldFileP6SHOGUNPc";
 constexpr uint32_t kPartCountOff = 0x10168;
 constexpr uint32_t kEventSize    = 12;
 
+// Events name their entity by hash, and the names live in the pack. Every
+// BH_Load* takes the name in r1 and hashes it immediately, so watching them as
+// a level loads captures exactly the cast that level's timeline refers to.
+const char* kEntityLoaders[] = {
+    "BH_LoadBadGuy", "BH_LoadBullet", "BH_LoadGenericEntity",
+};
+
 struct State {
   Runtime* rt = nullptr;
   uint32_t shogun = 0;          // learned from the InitSettingsMenu watch
@@ -131,6 +139,10 @@ struct State {
   std::string world;           // level name, from the InitWorldFile watch
   bool     want_dump = false;
   bool     dumped_part = false;
+  std::vector<std::string> new_names;      // captured by the loader watches
+  std::map<uint32_t, std::string> by_hash; // resolved name table
+  std::vector<uint8_t> events;             // last partition dumped
+  bool     want_resolve = false;
 };
 State g;
 
@@ -172,6 +184,53 @@ void DumpOnce() {
   }
 }
 
+// Turn the names the loader watches captured into hashes, using the engine's
+// own hash so there is no chance of reimplementing it subtly wrong. Runs from
+// the tick: the watches themselves cannot call into the guest.
+void ResolveNames() {
+  if (g.new_names.empty()) return;
+  std::vector<std::string> todo;
+  todo.swap(g.new_names);
+  for (const std::string& n : todo) {
+    if (n.empty() || n.size() > 120) continue;
+    const uint32_t p = GuestStr(n.c_str());
+    if (!p) continue;
+    uint32_t h = 0;
+    if (CallQuiet("UE_GetHashFromString", {p, 1}, &h) && h) {
+      if (g.by_hash.find(h) == g.by_hash.end()) {
+        g.by_hash[h] = n;
+        LOGI("entity 0x%08x = '%s'", h, n.c_str());
+      }
+    }
+    g.rt->Free(p);
+  }
+  g.want_resolve = true;
+}
+
+// Re-list the dumped timeline with the hashes replaced by names.
+void ResolveDump() {
+  if (g.events.empty() || g.by_hash.empty()) return;
+  g.want_resolve = false;
+  const size_t n = g.events.size() / kEventSize;
+  size_t named = 0;
+  for (size_t i = 0; i < n; i++) {
+    uint32_t w[3];
+    std::memcpy(w, g.events.data() + i * kEventSize, kEventSize);
+    if (g.by_hash.count(w[1])) named++;
+  }
+  LOGI("timeline '%s': %zu/%zu events named", g.world.c_str(), named, n);
+  if (named == 0) return;
+  for (size_t i = 0; i < n && i < 40; i++) {
+    uint32_t w[3];
+    std::memcpy(w, g.events.data() + i * kEventSize, kEventSize);
+    const uint16_t t = static_cast<uint16_t>(w[0] & 0xffff);
+    const uint16_t x = static_cast<uint16_t>(w[0] >> 16);
+    auto it = g.by_hash.find(w[1]);
+    LOGI("  t=%-5u where=%-6u flags=0x%-5x %s", t, x, w[2],
+         it == g.by_hash.end() ? "<unknown>" : it->second.c_str());
+  }
+}
+
 // Dump the current level's event timeline. This is the first step towards
 // authoring one: the format documents itself far better from a real example
 // than from reading the loader.
@@ -195,6 +254,8 @@ void DumpPartition() {
     LOGW("partition: read failed");
     return;
   }
+  g.events = ev;
+  g.want_resolve = true;
   // Three words per event; print them decoded as well as raw so the fields
   // are recognisable at a glance.
   const uint32_t show = count < 24 ? count : 24;
@@ -494,6 +555,17 @@ void InstallHardMode(Runtime& rt, const std::string& files_dir) {
     LOGI("cheats: watching %s @0x%08x", kInitWorldFile, wf);
   }
 
+  for (const char* sym : kEntityLoaders) {
+    const uint32_t at = rt.SymAddr(sym);
+    if (!at) continue;
+    rt.AddWatch(at, [](Runtime& r) {
+      // r1 is the name; every BH_Load* hashes it as its first act.
+      std::string n = r.CStr(r.Arg(1), 120);
+      if (!n.empty()) g.new_names.push_back(std::move(n));
+    });
+    LOGI("cheats: watching %s @0x%08x", sym, at);
+  }
+
   const uint32_t pg = rt.SymAddr(kInitPlayerGame);
   if (pg) {
     rt.AddWatch(pg, [](Runtime& r) {
@@ -515,6 +587,11 @@ void HardModeTick(uint64_t ticks) {
   if (g.want_dump && !g.dumped_part && (ticks % 30) == 0) {
     LOGI("level: '%s' starting", g.world.c_str());
     DumpPartition();
+  }
+
+  if ((ticks % 30) == 0) {
+    ResolveNames();
+    if (g.want_resolve) ResolveDump();
   }
 
   if (g.want_restore) {

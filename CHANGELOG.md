@@ -77,6 +77,12 @@ What made it possible, all of it data rather than code:
   adb cannot reach its private storage; the events go to logcat both decoded
   and as hex that can be reassembled into a binary. A watch on
   `InitWorldFile(SHOGUN*, char*)` supplies the level name.
+- **Entity name resolution**, which makes a dumped timeline readable. Events
+  name their entity by hash; every `BH_Load*` takes the name in `r1` and hashes
+  it immediately, so watching them captures a level's cast as it loads. One run
+  over the volcano level captured 215 names and resolved 155 of its 172 events,
+  showing hand-authored V formations: a lead enemy, then symmetric pairs
+  widening either side of it a few ticks apart.
 
 ### Fixed
 - **Using the shield slider froze the game.** A slide-bar's last three
