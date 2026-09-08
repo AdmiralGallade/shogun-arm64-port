@@ -107,7 +107,67 @@ Bullet patterns are **scripted**, with a VM whose variables include `RANK`,
 `ROUNDRANK`, `TRUNCRANK` and `DIFFICULTY` — which is how difficulty actually
 reaches the patterns.
 
-## 6. Patch the binary
+## 6. Levels
+
+A level is four separate things, and the engine exports enough to reach all of
+them.
+
+| Piece | Format | Loaded by |
+|---|---|---|
+| World file | text config | `LoadWorldFile(SHOGUN*, char*)` -> `UE_LoadConfigFile` |
+| Partition | binary | `InitWorldFile` -> `BH_LoadPartition` -> `UE_LoadBinFile` |
+| Entity defs | text config | `BH_LoadBadGuy` and friends, by name |
+| Registration | mission index | `StartNewGame(SHOGUN*, n)` writes `SHOGUN+0x4e70` |
+
+### The partition format
+
+`BH_SavePartition(handle, name)` gives it away entirely -- it is a single call
+to `UE_SaveBinFile(name, &count, 2 + count*12)`. So a partition is a `uint16`
+event count followed by that many 12-byte events, and it can be read straight
+out of the BH context at `+0x10168` without going near a file.
+
+Dumped from `worlds/ocean/scripts/ocean.world` (133 events, 1596 bytes):
+
+```c
+struct EVENT {            // 12 bytes
+  uint16 time;            // 109 .. 4997, monotonically non-decreasing
+  uint16 where;           // spawn position for ordinary events
+  uint32 name_hash;       // UE_GetHashFromString of the entity name
+  uint32 flags;           // 0, 0x10, 0x18, 0x20, 0x30, 0x54, 0x70, 0xfff0
+};
+```
+
+Confirmed against the real data: the time column is sorted, so a partition is a
+timeline; 30 distinct hashes appear across 133 events, so a level reuses a small
+cast; and eight events carry a `name_hash` of 0 with a `where` field outside the
+playfield, which lines up with `BH_RegisterPartitionCustomEventCallback` -- they
+are almost certainly scripted events rather than spawns.
+
+### What is still unknown
+
+- **Hash to name.** `UE_GetHashFromString` is exported, so candidate names can
+  be hashed and matched, but the names themselves live in the pack. Hooking the
+  `"BH: Loading %s.badguy..."` path would capture a level's cast as it loads.
+- Whether `where` is purely an x coordinate; it is for ordinary spawns, but the
+  custom events use it for something else.
+- Whether a partition can reference an entity the pack does not contain.
+
+### Why this is tractable
+
+Every piece needed is a public export:
+
+| Export | Use |
+|---|---|
+| `BH_GetPartitionEvent` / `BH_SetPartitionEvent` | read and write single events through the engine, no memory poking |
+| `BH_SavePartition` / `BH_LoadPartition` | round-trip a whole timeline |
+| `UE_GetHashFromString` | resolve entity names to the hashes events use |
+| `UE_CreateArchive`, `UE_AddBufferToArchive`, `UE_PushCurrentArchive` | build a small archive of new files and have it searched ahead of the 19 MB pack, instead of repacking it |
+| `UE_SaveConfigFile`, `UE_WriteConfigScript` | write the text formats |
+
+`BH_SavePartition` and `UE_WriteConfigScript` existing at all says int13 had an
+in-engine editor, which is why the formats are so approachable.
+
+## 7. Patch the binary
 
 Still available and cheap for small things (the original APK patcher does two
 4-byte edits to stub the dead billing calls), but nothing in the port needs it
