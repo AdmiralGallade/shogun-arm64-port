@@ -33,9 +33,10 @@ The first build that runs the game end to end on a 64-bit-only Android device.
   the info box and What's New, so exactly one spare tab exists.
 - **Full Capsules** sets the player's capsule count (`PLAYER+0x74`, which
   `InitPlayerGame` sets to 3) to its maximum at the start of a game.
-- **Shield strength**, 0.2x to 5x. Rather than find and patch every damage
-  site, the shield value (`PLAYER+0x8c`) is watched and the share of each hit
-  the multiplier says should not have landed is given back.
+- **Shield strength**, 0.2x to 5x with the knob centred at no change. Rather
+  than find and patch every damage site, the shield value (`PLAYER+0x8c`) is
+  watched and the share of each hit the multiplier says should not have landed
+  is given back.
 - **A "Hard Mode" switch in the game's own Options tab.** The game has no hard
   mode as such: it has *rank*, a dynamic difficulty value that rises as you
   play well, and the engine pins it to its ceiling from mission 3 onward. The
@@ -49,6 +50,16 @@ The first build that runs the game end to end on a 64-bit-only Android device.
   state the engine never hands out.
 
 ### Fixed
+- **Using the shield slider froze the game.** A slide-bar's last three
+  arguments are `(onMove, onRelease, user)`, not `(callback, user, spare)` --
+  the symbol table names them, `slideBar_masterVolume_onMove` and
+  `slideBar_sensitivityX_onRelease`. Passing the game state as the second one
+  had the engine call it as a function and branch into heap data. The same
+  mistake put the knob off-scale: `UpdateSettingsLine` mirrors a value as
+  `(max + min) - v`, so the range is the two constants every slider is built
+  with, `0x10000..0x20000` -- and the initial value handed over was below the
+  minimum. Confirmed by a real drag reporting `0x1cccd` and the maximum landing
+  exactly on `0x20000`.
 - **Toggling a host-provided settings switch froze the game.** The switch
   callback runs inside guest execution, on a thread already holding the runtime
   lock; calling back into the guest from there deadlocked. Guest calls are now

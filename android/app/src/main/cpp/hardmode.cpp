@@ -77,15 +77,20 @@ constexpr uint32_t kPlayerShield   = 0x8c;
 constexpr int32_t  kShieldFull     = 0xaaaa;
 constexpr uint32_t kMaxCapsules    = 9;
 
-// The game's own sliders are all built with these two, so they are geometry
-// rather than a value range; the value itself arrives in the callback.
-constexpr uint32_t kSliderP11 = 0x10000, kSliderP12 = 0x20000;
+// Every one of the game's own sliders passes these two, and UpdateSettingsLine
+// mirrors a value as (p12 + p11) - v -- which only balances if they are the
+// ends of the range. So the slider runs 0x10000..0x20000, and the midpoint is
+// 0x18000. Handing it 0x8000 put the knob below its own minimum.
+constexpr uint32_t kSliderMin = 0x10000;
+constexpr uint32_t kSliderMax = 0x20000;
+constexpr uint32_t kSliderMid = (kSliderMin + kSliderMax) / 2;
 
 // Trap page for the guest-callable callbacks we hand the engine.
 constexpr uint32_t kCbBase     = 0x7E800000u;
-constexpr uint32_t kCbHardMode = kCbBase + 0x00;
-constexpr uint32_t kCbCapsules = kCbBase + 0x04;
-constexpr uint32_t kCbShield   = kCbBase + 0x08;
+constexpr uint32_t kCbHardMode  = kCbBase + 0x00;
+constexpr uint32_t kCbCapsules  = kCbBase + 0x04;
+constexpr uint32_t kCbShieldMv  = kCbBase + 0x08;   // onMove
+constexpr uint32_t kCbShieldRel = kCbBase + 0x0c;   // onRelease
 
 const char* kInitSettingsMenu = "_Z16InitSettingsMenuP6SHOGUN";
 const char* kInitSettingTabs  = "_Z15InitSettingTabsP6SHOGUN";
@@ -218,11 +223,20 @@ bool AddSwitch(const char* name, const char* label, uint32_t handle,
   return true;
 }
 
+// Inverse of SetShieldFromSlider, so a saved multiplier restores the knob.
+uint32_t ShieldToSlider(double mult) {
+  const double frac = mult < 1.0 ? (mult - 0.2) / 0.8 * 0.5
+                                 : 0.5 + (mult - 1.0) / 4.0 * 0.5;
+  const double f = frac < 0.0 ? 0.0 : (frac > 1.0 ? 1.0 : frac);
+  return kSliderMin +
+         static_cast<uint32_t>(f * (kSliderMax - kSliderMin));
+}
+
 // Add a slider as the next line of our tab. The two magic parameters are the
 // ones every one of the game's own sliders uses, so they are geometry, not a
 // value range; the chosen value arrives in the callback like a switch's state.
 bool AddSlider(const char* name, const char* label, uint32_t handle,
-               uint32_t callback, uint32_t value) {
+               uint32_t on_move, uint32_t on_release, uint32_t value) {
   const uint32_t tab = TabAt(kOurTab);
   const uint16_t n = RdU16(tab + kTabCountAt);
   if (n >= kLineCap) return false;
@@ -233,9 +247,13 @@ bool AddSlider(const char* name, const char* label, uint32_t handle,
   if (!nm || !lb) return false;
   uint32_t out = 0;
   std::string err;
+  // (line, name, x, y, w, h, handle, label, onMove, onRelease, user, min,
+  //  max, value). The last three pointers are two callbacks and a user
+  // pointer, NOT callback+user+spare: passing the game state as the second one
+  // had the engine call it as a function, which hung the whole game.
   if (!g.rt->CallSym(kInitSliderLine,
-                     {line, nm, kRowX, y, kRowW, kRowH, handle, lb, callback,
-                      g.shogun, 0, kSliderP11, kSliderP12, value},
+                     {line, nm, kRowX, y, kRowW, kRowH, handle, lb, on_move,
+                      on_release, g.shogun, kSliderMin, kSliderMax, value},
                      &out, &err)) {
     LOGW("cheats: '%s' failed: %s", label, err.c_str());
     return false;
@@ -258,7 +276,8 @@ void BuildLines() {
   if (RdU16(TabAt(kOurTab) + kTabCountAt) != 0) return;   // already populated
   AddSwitch("HardMode", "Hard Mode", kSwHardMode, kCbHardMode, g.hard);
   AddSwitch("MaxCapsules", "Full Capsules", kSwCapsules, kCbCapsules, g.caps);
-  AddSlider("ShieldStrength", "Shield", kSlShield, kCbShield, 0x8000);
+  AddSlider("ShieldStrength", "Shield", kSlShield, kCbShieldMv, kCbShieldRel,
+            ShieldToSlider(g.shield_mult));
 }
 
 // ---- preference ----------------------------------------------------------
@@ -293,23 +312,18 @@ void SetFullCapsules(bool on) {
   LOGI("cheats: full capsules %s", on ? "ON" : "off");
 }
 
-// The slider hands back its position in the callback. Full scale is taken to
-// be kSliderP11, which is what the line was built with and what the game's own
-// sliders use; the raw value is logged so the assumption is checkable against
-// a real drag rather than trusted. Calibrating from "largest value seen so
-// far" was worse: the first drag anywhere would read as maximum.
-constexpr uint32_t kSliderFull = kSliderP11;   // 0x10000
-
+// Centre is neutral: the knob in the middle changes nothing, left makes the
+// shield weaker and right makes it stronger, symmetrically.
 void SetShieldFromSlider(uint32_t raw) {
-  double frac = static_cast<double>(raw) / static_cast<double>(kSliderFull);
+  double frac = (static_cast<double>(raw) - kSliderMin) /
+                static_cast<double>(kSliderMax - kSliderMin);
   if (frac < 0.0) frac = 0.0;
   if (frac > 1.0) frac = 1.0;
-  // 0 -> 0.2x (five times more fragile), middle -> 1x, full -> 5x
-  g.shield_mult = frac < 0.5 ? 0.2 + (frac / 0.5) * 0.8
-                             : 1.0 + ((frac - 0.5) / 0.5) * 4.0;
+  g.shield_mult = frac < 0.5 ? 0.2 + (frac / 0.5) * 0.8    // 0.2x .. 1x
+                             : 1.0 + ((frac - 0.5) / 0.5) * 4.0;  // 1x .. 5x
   SavePref();
-  LOGI("cheats: shield slider raw=%u/%u -> %.2fx", raw, kSliderFull,
-       g.shield_mult);
+  LOGI("cheats: shield slider raw=0x%x -> %.2fx (%+.0f%%)", raw, g.shield_mult,
+       (g.shield_mult - 1.0) * 100.0);
 }
 
 void SetHardMode(bool on) {
@@ -335,7 +349,8 @@ void InstallHardMode(Runtime& rt, const std::string& files_dir) {
     switch (addr) {
       case kCbHardMode: SetHardMode(state != 0); break;
       case kCbCapsules: SetFullCapsules(state != 0); break;
-      case kCbShield:   SetShieldFromSlider(state); break;
+      case kCbShieldMv:  SetShieldFromSlider(state); break;
+      case kCbShieldRel: break;   // must be a real function, but does nothing
       default: LOGW("cheats: callback at unmapped 0x%08x", addr); break;
     }
     r.Ret(0);
