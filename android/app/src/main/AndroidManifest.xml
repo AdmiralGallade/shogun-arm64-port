@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="net.int13.shogun"
+    android:versionCode="10204" android:versionName="1.2.4-arm64">
+  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36" />
+  <uses-feature android:glEsVersion="0x00010001" android:required="true" />
+  <application android:label="Shogun" android:hasCode="true"
+               android:allowBackup="false" android:extractNativeLibs="true">
+    <activity android:name="net.int13.shogun.ShogunActivity"
+              android:label="Shogun"
+              android:screenOrientation="portrait"
+              android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+              android:launchMode="singleTask"
+              android:resizeableActivity="false"
+              android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|density|fontScale|layoutDirection|locale"
+              android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

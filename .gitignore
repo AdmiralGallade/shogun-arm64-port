@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# Signing material. NEVER commit these: whoever holds the key can ship an
+# update that Android will accept as yours.
+# ---------------------------------------------------------------------------
+*.keystore
+*.jks
+*.pem
+*.p12
+*.key
+*.idsig
+
+# ---------------------------------------------------------------------------
+# Game content. This repository ships the port, not the game -- supply your
+# own copy of the APK you own (see README, "Supply the game").
+# ---------------------------------------------------------------------------
+*.apk
+*.mp3
+*.wav
+libHAL.Android.so
+android/app/src/main/assets/
+runtime/assets/
+runtime/lib/
+runtime/ext/
+apk-patch/out/
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+build/
+.cxx/
+.gradle/
+*.o
+*.so
+*.class
+*.dex
+*.pdb
+android/app/src/main/jniLibs/
+unicorn/
+bench/trapbench
+bench/cpubench-*
+bench/*.pdb
+
+# Tooling
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
