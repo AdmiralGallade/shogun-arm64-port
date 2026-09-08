@@ -40,6 +40,8 @@ def main() -> int:
                     help="your copy of the Shogun APK")
     ap.add_argument("--no-changelog", action="store_true",
                     help="skip the in-game credit patch")
+    ap.add_argument("--no-icons", action="store_true",
+                    help="skip launcher icon generation (needs Pillow)")
     args = ap.parse_args()
 
     if not os.path.exists(args.apk):
@@ -83,6 +85,17 @@ def main() -> int:
         if r.returncode != 0:
             sys.exit("changelog patch failed; re-run with --no-changelog to skip it")
         print("  ->", os.path.relpath(apk_lib, ROOT), "(changelog patched)")
+
+    # Launcher icons, rebuilt from the original artwork into an adaptive icon.
+    # Without this the app installs showing the default Android robot.
+    if not args.no_icons:
+        res = os.path.join(ROOT, "android", "app", "src", "main", "res")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "make_icons.py"),
+                            args.apk, res])
+        if r.returncode != 0:
+            print("icon generation failed; re-run with --no-icons to skip it",
+                  file=sys.stderr)
+            return 1
 
     print("\nready. Next: build unicorn, then android/build-apk.sh -- see the README.")
     return 0

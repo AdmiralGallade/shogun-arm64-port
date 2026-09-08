@@ -108,6 +108,7 @@ behind it in the first place (see [apk-patch/README.md](apk-patch/README.md)).
 * A JDK 17+ (`JAVA_HOME` — Android Studio ships one under `jbr/`)
 * Android NDK (`ANDROID_NDK`)
 * CMake 3.22+, Python 3.9+
+* `pip install Pillow` for launcher-icon generation
 * For the desktop harness only: `pip install unicorn capstone keystone-engine`
 
 ### 2. Supply the game
@@ -120,8 +121,9 @@ python tools/extract_assets.py Shogun-1.2.4.apk
 ```
 
 That unpacks the engine binary and the encrypted asset pack into the places the
-build expects, and rewrites the in-game "What's New" panel to credit the port.
-Nothing it produces is tracked by git.
+build expects, rebuilds the launcher icon as an adaptive icon, and rewrites the
+in-game "What's New" panel to credit the port. Nothing it produces is tracked by
+git.
 
 ### 3. Build Unicorn for arm64-v8a
 
@@ -170,7 +172,7 @@ gitignored, and you need the same one to sign any later update.
 | `runtime/` | The desktop harness the design was proven on, in Python |
 | `apk-patch/` | Repack/re-sign the *original* 32-bit APK (v1 + v2 signing, pure Python) |
 | `bench/` | Trap-cost benchmark — the number that decides whether 60 fps is reachable |
-| `tools/` | Asset extraction, changelog patching |
+| `tools/` | Asset extraction, icon generation, changelog patching |
 | `device-test.py` | Everything about a connected device that adb alone can establish |
 | `docs/` | How it was done, the porting findings, and the harness notes |
 

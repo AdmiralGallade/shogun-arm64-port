@@ -18,6 +18,14 @@
 *.wav
 libHAL.Android.so
 android/app/src/main/assets/
+# Launcher icons are derived from the original artwork, so they are generated
+# by tools/make_icons.py rather than committed. The adaptive-icon XML that
+# references them contains no artwork and IS tracked.
+android/app/src/main/res/drawable-nodpi/
+android/app/src/main/res/mipmap-hdpi/
+android/app/src/main/res/mipmap-mdpi/
+android/app/src/main/res/mipmap-ldpi/
+android/app/src/main/res/values/ic_launcher_bg.xml
 runtime/assets/
 runtime/lib/
 runtime/ext/

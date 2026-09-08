@@ -18,6 +18,10 @@ The first build that runs the game end to end on a 64-bit-only Android device.
 - Android shell: `GLSurfaceView`, letterboxed viewport, touch mapping, an
   `AudioTrack` thread fed by the engine's software mixer.
 - Gradle-free packaging pipeline (`build-apk.sh`).
+- Launcher icon rebuilt from the original 96x96 bitmap as an adaptive icon, so
+  a modern launcher masks the artwork deliberately instead of shrinking a
+  legacy bitmap into a white circle. Without it the app showed the default
+  Android robot, because the manifest declared no icon at all.
 - Desktop Python harness the whole design was proven on, 39/39 checks passing.
 
 ### Fixed
