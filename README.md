@@ -68,8 +68,13 @@ engine binds its pointers once and rewrites the buffer between draws.
 memory. The engine calls into it exactly as it would on a 2012 device; each
 slot traps out to the real `JNIEnv` on the host side.
 
-The full engineering write-up, including the address map and the failures
-worth remembering, is in [docs/PORTING.md](docs/PORTING.md).
+Two write-ups go deeper:
+
+- **[docs/FROM-ONE-APK.md](docs/FROM-ONE-APK.md)** — how the port was actually
+  arrived at, starting from nothing but the APK: what to look at, in what
+  order, and which findings decided what happened next.
+- **[docs/PORTING.md](docs/PORTING.md)** — the address map and the nine
+  findings that cost the most to learn.
 
 ---
 
@@ -167,7 +172,7 @@ gitignored, and you need the same one to sign any later update.
 | `bench/` | Trap-cost benchmark — the number that decides whether 60 fps is reachable |
 | `tools/` | Asset extraction, changelog patching |
 | `device-test.py` | Everything about a connected device that adb alone can establish |
-| `docs/` | Porting write-up and the harness notes |
+| `docs/` | How it was done, the porting findings, and the harness notes |
 
 ---
 
