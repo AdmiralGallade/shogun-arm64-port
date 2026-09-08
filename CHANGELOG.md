@@ -25,6 +25,17 @@ The first build that runs the game end to end on a 64-bit-only Android device.
 - Desktop Python harness the whole design was proven on, 39/39 checks passing.
 
 ### Added (gameplay)
+- **A "Cheats" tab in the game's own settings menu**, beside Controls and
+  Options, holding Hard Mode, Full Capsules and a Shield strength slider. The
+  tab count is a plain field at `SHOGUN+0x8ba34`, so a third tab can be
+  declared; the memory it needs (`0x8c500..0x8ca68`) was checked against every
+  function in the binary and nothing else addresses it. Tab 3 onward belongs to
+  the info box and What's New, so exactly one spare tab exists.
+- **Full Capsules** sets the player's capsule count (`PLAYER+0x74`, which
+  `InitPlayerGame` sets to 3) to its maximum at the start of a game.
+- **Shield strength**, 0.2x to 5x. Rather than find and patch every damage
+  site, the shield value (`PLAYER+0x8c`) is watched and the share of each hit
+  the multiplier says should not have landed is given back.
 - **A "Hard Mode" switch in the game's own Options tab.** The game has no hard
   mode as such: it has *rank*, a dynamic difficulty value that rises as you
   play well, and the engine pins it to its ceiling from mission 3 onward. The

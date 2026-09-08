@@ -1,27 +1,35 @@
-// hardmode.cpp -- difficulty control, and the settings line that drives it.
+// hardmode.cpp -- a Cheats tab in the game's own settings menu.
 //
 // The game has no "hard mode". What it has is *rank*: a 16.16 fixed-point
 // dynamic-difficulty value at PLAYER+0x90 that rises when you kill things and
-// falls when you are hit, clamped to [BH_GetMinRank(), BH_GetMaxRank()]. The
-// engine ratchets the floor itself once you are past the early missions:
+// falls when you are hit, clamped to [BH_GetMinRank(), BH_GetMaxRank()] --
+// measured live as 1.0 and 20.0. The engine ratchets the floor itself:
 //
-//     if (shogun->mission > 1) BH_SetMinRank(kBhHandle, 20.0);
+//     if (shogun->mission > 1) BH_SetMinRank(kBhHandle, 20.0);   // the ceiling
 //
-// So "start on hard" is just raising that floor from the first mission. Every
-// lever needed is a public export, so none of this patches the binary.
+// So "start on hard" is that same call from mission 1. Every lever used here is
+// a public export, so none of this patches the binary.
 //
-// The settings menu is likewise data, not code. Lines live in a fixed
-// [tab][line] array inside the SHOGUN struct, and the per-tab line count is a
-// uint16 in memory rather than a compiled-in bound -- so a line can be
-// appended at runtime by calling the engine's own constructor and bumping the
-// count. The layout constants below were read out of UpdateSettingsMenu and
-// InitSwitchSettingsLine; nothing here is guesswork, but all of it is checked
-// before use, because being wrong means writing over the game's own state.
+// The settings menu is likewise data, not code:
+//
+//   * tabs live at SHOGUN+0x8ba30, stride 0x568, and the tab *count* is a
+//     plain field at SHOGUN+0x8ba34 -- so a third tab can be added,
+//   * each tab holds up to 14 SETTINGSLINEs at tab+0x1c, stride 0x60, and its
+//     line count is a uint16 at tab+8,
+//   * lines are built by the engine's own constructors, which register them by
+//     name and give switches a callback pointer.
+//
+// The memory a third tab needs (0x8c500..0x8ca68) was checked against every
+// function in the binary: nothing else addresses it. Tab 3 onward belongs to
+// the info box and the What's New panel, so exactly one spare tab exists --
+// which is also why the lines live here rather than appended to Options, where
+// the panel is a fixed height and an 11th row lands under the OK button.
 #include <android/log.h>
 
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "shogun_runtime.h"
 
@@ -32,112 +40,91 @@ namespace shogun {
 namespace {
 
 // ---- what the teardown established --------------------------------------
-constexpr uint32_t kBhHandle   = 0x405;    // UE handle for the bullet-hell module
-constexpr uint32_t kTabsOff    = 0x8ba30;  // SHOGUN -> SETTINGSTAB[]
-constexpr uint32_t kTabStride  = 0x568;
-constexpr uint32_t kTabCountAt = 0x08;     // uint16: lines used in this tab
-constexpr uint32_t kLinesOff   = 0x1c;     // first SETTINGSLINE within a tab
-constexpr uint32_t kLineStride = 0x60;
-constexpr uint32_t kLineCap    = (kTabStride - kLinesOff) / kLineStride;  // 14
+constexpr uint32_t kBhHandle    = 0x405;    // UE handle for the bullet-hell module
+constexpr uint32_t kTabsOff     = 0x8ba30;  // SHOGUN -> SETTINGSTAB[]
+constexpr uint32_t kTabCountOff = 0x8ba34;  // SHOGUN -> number of tabs
+constexpr uint32_t kTabStride   = 0x568;
+constexpr uint32_t kTabCountAt  = 0x08;     // uint16: lines used in this tab
+constexpr uint32_t kTabLabelAt  = 0x0c;     // inline label buffer
+constexpr uint32_t kLinesOff    = 0x1c;     // first SETTINGSLINE within a tab
+constexpr uint32_t kLineStride  = 0x60;
+constexpr uint32_t kLineCap     = (kTabStride - kLinesOff) / kLineStride;  // 14
 
-// SETTINGSLINE fields used here (from InitTextSettingsLine / InitSwitchSettingsLine)
-constexpr uint32_t kLineX      = 0x04;
-constexpr uint32_t kLineY      = 0x08;
-constexpr uint32_t kLineP5     = 0x0c;
-constexpr uint32_t kLineP4     = 0x10;
-constexpr uint32_t kLineWidget = 0x18;     // 0 = text, 2 = switch
-constexpr uint32_t kLineHandle = 0x1c;     // switch handle, via UE_AllocHandle
+// SETTINGSLINE fields (from InitTextSettingsLine / InitSwitchSettingsLine)
+constexpr uint32_t kLineWidget = 0x18;     // 0 text, 1 separator, 2 switch, 4 slider
+constexpr uint32_t kLineHandle = 0x1c;     // widget handle, via UE_AllocHandle
 
-// The engine's own hard floor, in 16.16. Measured on device, maxRank is also
-// 20.0 -- so this floor pins rank to the ceiling, which is what "hard" means
-// here: the dynamic difficulty stops being dynamic and stays at the top.
-constexpr uint32_t kRankHard = 20u << 16;
+// Row geometry, copied from the tabs the game builds itself.
+constexpr uint32_t kFirstRowY = 129;
+constexpr uint32_t kRowStep   = 25;
+constexpr uint32_t kRowX      = 24;
+constexpr uint32_t kRowW      = 191;
+constexpr uint32_t kRowH      = 25;
 
-// Measured on device: tab 0 is Controls, tab 1 is the gameplay/audio tab that
-// already holds "Display Ship Hitbox", "Use Dark Ship" and friends, with 4 of
-// its 14 slots free. Lines there sit at x=24, w=191, h=25, stepping y by 25.
-constexpr uint32_t kOurTab    = 1;
-constexpr uint32_t kLineStep  = 25;
-// Settings switches own sequential UE handles; the game's run 0x6cb..0x6d7.
-constexpr uint32_t kOurSwitch = 0x6d8;
-constexpr uint32_t kOurWidget = 2;        // switch
+constexpr uint32_t kOurTab = 2;            // the one spare tab
+// Settings widgets own sequential UE handles; the game's run 0x6cb..0x6d7.
+constexpr uint32_t kSwHardMode = 0x6e0;
+constexpr uint32_t kSwCapsules = 0x6e1;
+constexpr uint32_t kSlShield   = 0x6e2;
 
-// Trap page for the one guest-callable function we hand the engine.
-constexpr uint32_t kCbBase = 0x7E800000u;
+constexpr uint32_t kRankHard = 20u << 16;  // == the measured ceiling
+constexpr uint32_t kRankBase = 1u << 16;
+
+// PLAYER fields, read out of UpdateShield / UpdateLives / InitPlayerGame.
+// InitPlayerGame sets shield to 0xaaaa and capsules to 3 on every new game.
+constexpr uint32_t kPlayerCapsules = 0x74;
+constexpr uint32_t kPlayerShield   = 0x8c;
+constexpr int32_t  kShieldFull     = 0xaaaa;
+constexpr uint32_t kMaxCapsules    = 9;
+
+// The game's own sliders are all built with these two, so they are geometry
+// rather than a value range; the value itself arrives in the callback.
+constexpr uint32_t kSliderP11 = 0x10000, kSliderP12 = 0x20000;
+
+// Trap page for the guest-callable callbacks we hand the engine.
+constexpr uint32_t kCbBase     = 0x7E800000u;
+constexpr uint32_t kCbHardMode = kCbBase + 0x00;
+constexpr uint32_t kCbCapsules = kCbBase + 0x04;
+constexpr uint32_t kCbShield   = kCbBase + 0x08;
 
 const char* kInitSettingsMenu = "_Z16InitSettingsMenuP6SHOGUN";
+const char* kInitSettingTabs  = "_Z15InitSettingTabsP6SHOGUN";
+const char* kInitSwitchLine =
+    "_Z22InitSwitchSettingsLineP12SETTINGSLINEPciiiijS1_PvS2_j";
+const char* kInitSliderLine =
+    "_Z24InitSlideBarSettingsLineP12SETTINGSLINEPciiiijS1_PvS2_S2_iii";
+const char* kInitPlayerGame = "_Z14InitPlayerGameP6PLAYER";
 
 struct State {
   Runtime* rt = nullptr;
   uint32_t shogun = 0;          // learned from the InitSettingsMenu watch
   bool     dumped = false;
-  bool     enabled = false;
-  uint32_t rank = kRankHard;
-  std::string save_path;
-  uint32_t name_str = 0, label_str = 0;   // guest copies, allocated once
-  int      appended = 0;                  // times the line has been added
+  bool     tab_made = false;
   bool     giveup = false;
-  bool     want_restore = false;          // hand the floor back, from the tick
+  bool     hard = false;
+  bool     want_restore = false;
+  uint32_t rank = kRankHard;
+  // shield: damage is scaled by 1/mult, so mult>1 is tougher
+  double   shield_mult = 1.0;
+  bool     caps = false;
+  uint32_t player = 0;        // learned from the InitPlayerGame watch
+  bool     player_fresh = false;
+  int32_t  shield_prev = -1;
+  std::string save_path;
 };
 State g;
 
 uint16_t RdU16(uint32_t a) { uint16_t v = 0; g.rt->Read(a, &v, 2); return v; }
 uint32_t RdU32(uint32_t a) { uint32_t v = 0; g.rt->Read(a, &v, 4); return v; }
+void WrU16(uint32_t a, uint16_t v) { g.rt->Write(a, &v, 2); }
+void WrU32(uint32_t a, uint32_t v) { g.rt->Write(a, &v, 4); }
 
 bool CallQuiet(const char* sym, const std::vector<uint32_t>& a, uint32_t* out) {
   std::string err;
   return g.rt->CallSym(sym, a, out, &err);
 }
 
-// The engine is the authority on its own numbers; ask it rather than assume.
-void DumpOnce() {
-  if (g.dumped) return;
-  g.dumped = true;
-
-  uint32_t mn = 0, mx = 0, cur = 0;
-  CallQuiet("BH_GetMinRank", {kBhHandle}, &mn);
-  CallQuiet("BH_GetMaxRank", {kBhHandle}, &mx);
-  CallQuiet("BH_GetRank",    {kBhHandle}, &cur);
-  LOGI("rank: min=%.2f max=%.2f current=%.2f  (engine's hard floor is %.1f)",
-       mn / 65536.0, mx / 65536.0, cur / 65536.0, kRankHard / 65536.0);
-
-  if (!g.shogun) { LOGW("settings: SHOGUN pointer not seen yet"); return; }
-  LOGI("settings: SHOGUN=0x%08x tabs at +0x%x stride 0x%x, %u lines/tab max",
-       g.shogun, kTabsOff, kTabStride, kLineCap);
-  for (uint32_t t = 0; t < 6; t++) {
-    const uint32_t tab = g.shogun + kTabsOff + t * kTabStride;
-    const uint16_t n = RdU16(tab + kTabCountAt);
-    if (n == 0 || n > kLineCap) {          // not a tab, or not one we understand
-      LOGI("  tab %u: count=%u  (skipped)", t, n);
-      continue;
-    }
-    LOGI("  tab %u: %u lines, %u free", t, n, kLineCap - n);
-    for (uint16_t i = 0; i < n; i++) {
-      const uint32_t ln = tab + kLinesOff + i * kLineStride;
-      LOGI("     line %u @0x%08x widget=%u x=%d y=%d p4=%d p5=%d handle=0x%x '%s'",
-           i, ln, RdU32(ln + kLineWidget),
-           static_cast<int32_t>(RdU32(ln + kLineX)),
-           static_cast<int32_t>(RdU32(ln + kLineY)),
-           static_cast<int32_t>(RdU32(ln + kLineP4)),
-           static_cast<int32_t>(RdU32(ln + kLineP5)),
-           RdU32(ln + kLineHandle),
-           g.rt->CStr(ln + 0x20, 31).c_str());
-    }
-  }
-}
-
-void LoadPref() {
-  if (g.save_path.empty()) return;
-  FILE* f = std::fopen(g.save_path.c_str(), "rb");
-  if (!f) return;
-  int on = 0, rank = 0;
-  if (std::fscanf(f, "%d %d", &on, &rank) == 2) {
-    g.enabled = on != 0;
-    if (rank > 0) g.rank = static_cast<uint32_t>(rank);
-  }
-  std::fclose(f);
-  LOGI("hard mode: loaded pref enabled=%d rank=%.2f", g.enabled, g.rank / 65536.0);
-}
+uint32_t TabAt(uint32_t i) { return g.shogun + kTabsOff + i * kTabStride; }
 
 uint32_t GuestStr(const char* text) {
   const uint32_t n = static_cast<uint32_t>(std::strlen(text)) + 1;
@@ -146,141 +133,292 @@ uint32_t GuestStr(const char* text) {
   return p;
 }
 
-// Add our switch to the end of the gameplay tab, using the engine's own
-// constructor so the line is a real one: registered by name, rendered and
-// hit-tested exactly like the game's own. Every assumption is re-checked here
-// because a wrong offset would scribble on live game state.
-void AppendLine() {
-  if (g.giveup || !g.shogun) return;
-  const uint32_t tab = g.shogun + kTabsOff + kOurTab * kTabStride;
+// ---- diagnostics ---------------------------------------------------------
+void DumpOnce() {
+  if (g.dumped || !g.shogun) return;
+  g.dumped = true;
+  uint32_t mn = 0, mx = 0, cur = 0;
+  CallQuiet("BH_GetMinRank", {kBhHandle}, &mn);
+  CallQuiet("BH_GetMaxRank", {kBhHandle}, &mx);
+  CallQuiet("BH_GetRank",    {kBhHandle}, &cur);
+  LOGI("rank: min=%.2f max=%.2f current=%.2f", mn / 65536.0, mx / 65536.0,
+       cur / 65536.0);
+  const uint32_t tabs = RdU32(g.shogun + kTabCountOff);
+  LOGI("settings: %u tabs", tabs);
+  for (uint32_t t = 0; t < tabs && t < 4; t++) {
+    const uint32_t tab = TabAt(t);
+    LOGI("  tab %u '%s': %u lines", t,
+         g.rt->CStr(tab + kTabLabelAt, 15).c_str(), RdU16(tab + kTabCountAt));
+  }
+}
+
+// ---- building the tab ----------------------------------------------------
+// Claim the one spare tab. Everything is checked first: being wrong here means
+// writing over live game state.
+bool EnsureTab() {
+  if (g.tab_made) return true;
+  if (g.giveup || !g.shogun) return false;
+  const uint32_t tabs = RdU32(g.shogun + kTabCountOff);
+  if (tabs == 0 || tabs > 8) return false;          // menu not built yet
+  if (tabs > kOurTab) { g.tab_made = true; return true; }   // already ours
+  if (tabs != kOurTab) {
+    LOGW("cheats: expected %u tabs, found %u -- not adding one", kOurTab, tabs);
+    g.giveup = true;
+    return false;
+  }
+  const uint32_t tab = TabAt(kOurTab);
+  // Start from a clean slate: this tab has never been initialised.
+  const std::vector<uint8_t> zero(kTabStride, 0);
+  g.rt->Write(tab, zero.data(), zero.size());
+  g.rt->Write(tab + kTabLabelAt, "Cheats", 7);
+  WrU16(tab + kTabCountAt, 0);
+  WrU32(g.shogun + kTabCountOff, kOurTab + 1);
+  // Let the engine measure the new label and lay the tab strip out itself.
+  uint32_t out = 0;
+  if (!CallQuiet(kInitSettingTabs, {g.shogun}, &out)) {
+    LOGW("cheats: InitSettingTabs failed, rolling back");
+    WrU32(g.shogun + kTabCountOff, kOurTab);
+    g.giveup = true;
+    return false;
+  }
+  g.tab_made = true;
+  LOGI("cheats: added tab %u 'Cheats' (now %u tabs)", kOurTab, kOurTab + 1);
+  return true;
+}
+
+// Add a switch as the next line of our tab.
+bool AddSwitch(const char* name, const char* label, uint32_t handle,
+               uint32_t callback, bool state) {
+  const uint32_t tab = TabAt(kOurTab);
   const uint16_t n = RdU16(tab + kTabCountAt);
-  if (n == 0 || n > kLineCap) return;            // menu not built yet
-  if (n >= kLineCap) {
-    LOGW("hard mode: tab %u is full (%u lines), not adding", kOurTab, n);
-    g.giveup = true;
-    return;
-  }
-  const uint32_t prev = tab + kLinesOff + (n - 1) * kLineStride;
-  // If our line is already the last one, the menu has not been rebuilt.
-  if (RdU32(prev + kLineHandle) == kOurSwitch) return;
-
-  const int32_t x  = static_cast<int32_t>(RdU32(prev + kLineX));
-  const int32_t y  = static_cast<int32_t>(RdU32(prev + kLineY)) + kLineStep;
-  const int32_t p4 = static_cast<int32_t>(RdU32(prev + kLineP4));
-  const int32_t p5 = static_cast<int32_t>(RdU32(prev + kLineP5));
-  if (x <= 0 || x > 400 || p4 <= 0 || p4 > 2000 || p5 <= 0 || p5 > 200) {
-    LOGW("hard mode: tab %u line %u looks wrong (x=%d w=%d h=%d), not adding",
-         kOurTab, n - 1, x, p4, p5);
-    g.giveup = true;
-    return;
-  }
-
-  if (!g.name_str)  g.name_str  = GuestStr("HardMode");
-  if (!g.label_str) g.label_str = GuestStr("Hard Mode");
-  if (!g.name_str || !g.label_str) { g.giveup = true; return; }
-
+  if (n >= kLineCap) return false;
   const uint32_t line = tab + kLinesOff + n * kLineStride;
-  // InitSwitchSettingsLine(line, name, x, y, w, h, switchHandle,
+  const uint32_t y = kFirstRowY + n * kRowStep;
+
+  const uint32_t nm = GuestStr(name), lb = GuestStr(label);
+  if (!nm || !lb) return false;
+  // InitSwitchSettingsLine(line, name, x, y, w, h, handle,
   //                        label, callback, user, initialState)
-  const std::vector<uint32_t> a = {
-      line, g.name_str, static_cast<uint32_t>(x), static_cast<uint32_t>(y),
-      static_cast<uint32_t>(p4), static_cast<uint32_t>(p5), kOurSwitch,
-      g.label_str, kCbBase, g.shogun, g.enabled ? 1u : 0u};
   uint32_t out = 0;
   std::string err;
-  if (!g.rt->CallSym("_Z22InitSwitchSettingsLineP12SETTINGSLINEPciiiijS1_PvS2_j",
-                     a, &out, &err)) {
-    LOGW("hard mode: InitSwitchSettingsLine failed: %s", err.c_str());
-    g.giveup = true;
-    return;
+  if (!g.rt->CallSym(kInitSwitchLine,
+                     {line, nm, kRowX, y, kRowW, kRowH, handle, lb, callback,
+                      g.shogun, state ? 1u : 0u}, &out, &err)) {
+    LOGW("cheats: '%s' failed: %s", label, err.c_str());
+    return false;
   }
-  if (RdU32(line + kLineWidget) != kOurWidget) {
-    LOGW("hard mode: line did not initialise (widget=%u), not publishing",
+  if (RdU32(line + kLineWidget) != 2) {
+    LOGW("cheats: '%s' did not initialise (widget=%u)", label,
          RdU32(line + kLineWidget));
-    g.giveup = true;
-    return;
+    return false;
   }
   // Only now make it visible to the menu's loops.
-  const uint16_t nn = static_cast<uint16_t>(n + 1);
-  g.rt->Write(tab + kTabCountAt, &nn, 2);
-  g.appended++;
-  LOGI("hard mode: added 'Hard Mode' as tab %u line %u @0x%08x (y=%d), pass %d",
-       kOurTab, n, line, y, g.appended);
+  WrU16(tab + kTabCountAt, static_cast<uint16_t>(n + 1));
+  LOGI("cheats: '%s' as line %u @0x%08x y=%u", label, n, line, y);
+  return true;
+}
+
+// Add a slider as the next line of our tab. The two magic parameters are the
+// ones every one of the game's own sliders uses, so they are geometry, not a
+// value range; the chosen value arrives in the callback like a switch's state.
+bool AddSlider(const char* name, const char* label, uint32_t handle,
+               uint32_t callback, uint32_t value) {
+  const uint32_t tab = TabAt(kOurTab);
+  const uint16_t n = RdU16(tab + kTabCountAt);
+  if (n >= kLineCap) return false;
+  const uint32_t line = tab + kLinesOff + n * kLineStride;
+  const uint32_t y = kFirstRowY + n * kRowStep;
+
+  const uint32_t nm = GuestStr(name), lb = GuestStr(label);
+  if (!nm || !lb) return false;
+  uint32_t out = 0;
+  std::string err;
+  if (!g.rt->CallSym(kInitSliderLine,
+                     {line, nm, kRowX, y, kRowW, kRowH, handle, lb, callback,
+                      g.shogun, 0, kSliderP11, kSliderP12, value},
+                     &out, &err)) {
+    LOGW("cheats: '%s' failed: %s", label, err.c_str());
+    return false;
+  }
+  if (RdU32(line + kLineWidget) != 4) {
+    LOGW("cheats: '%s' did not initialise (widget=%u)", label,
+         RdU32(line + kLineWidget));
+    return false;
+  }
+  WrU16(tab + kTabCountAt, static_cast<uint16_t>(n + 1));
+  LOGI("cheats: slider '%s' as line %u @0x%08x y=%u", label, n, line, y);
+  return true;
+}
+
+// The menu is rebuilt whenever it is constructed afresh, which resets the
+// counts and drops our lines. Re-adding when they are missing is cheaper and
+// far more robust than hooking every rebuild.
+void BuildLines() {
+  if (!EnsureTab()) return;
+  if (RdU16(TabAt(kOurTab) + kTabCountAt) != 0) return;   // already populated
+  AddSwitch("HardMode", "Hard Mode", kSwHardMode, kCbHardMode, g.hard);
+  AddSwitch("MaxCapsules", "Full Capsules", kSwCapsules, kCbCapsules, g.caps);
+  AddSlider("ShieldStrength", "Shield", kSlShield, kCbShield, 0x8000);
+}
+
+// ---- preference ----------------------------------------------------------
+void LoadPref() {
+  FILE* f = std::fopen(g.save_path.c_str(), "rb");
+  if (!f) return;
+  int hard = 0, caps = 0;
+  double mult = 1.0;
+  if (std::fscanf(f, "%d %d %lf", &hard, &caps, &mult) == 3) {
+    g.hard = hard != 0;
+    g.caps = caps != 0;
+    if (mult >= 0.2 && mult <= 5.0) g.shield_mult = mult;
+  }
+  std::fclose(f);
+  LOGI("cheats: loaded hard=%d caps=%d shield=%.2fx", g.hard, g.caps,
+       g.shield_mult);
+}
+
+void SavePref() {
+  FILE* f = std::fopen(g.save_path.c_str(), "wb");
+  if (!f) return;
+  std::fprintf(f, "%d %d %.3f\n", g.hard ? 1 : 0, g.caps ? 1 : 0,
+               g.shield_mult);
+  std::fclose(f);
 }
 
 }  // namespace
 
-// Defined below; the switch callback is installed before it in the file.
-void SetHardMode(bool on);
+void SetFullCapsules(bool on) {
+  g.caps = on;
+  SavePref();
+  LOGI("cheats: full capsules %s", on ? "ON" : "off");
+}
+
+// The slider hands back its position in the callback. Full scale is taken to
+// be kSliderP11, which is what the line was built with and what the game's own
+// sliders use; the raw value is logged so the assumption is checkable against
+// a real drag rather than trusted. Calibrating from "largest value seen so
+// far" was worse: the first drag anywhere would read as maximum.
+constexpr uint32_t kSliderFull = kSliderP11;   // 0x10000
+
+void SetShieldFromSlider(uint32_t raw) {
+  double frac = static_cast<double>(raw) / static_cast<double>(kSliderFull);
+  if (frac < 0.0) frac = 0.0;
+  if (frac > 1.0) frac = 1.0;
+  // 0 -> 0.2x (five times more fragile), middle -> 1x, full -> 5x
+  g.shield_mult = frac < 0.5 ? 0.2 + (frac / 0.5) * 0.8
+                             : 1.0 + ((frac - 0.5) / 0.5) * 4.0;
+  SavePref();
+  LOGI("cheats: shield slider raw=%u/%u -> %.2fx", raw, kSliderFull,
+       g.shield_mult);
+}
+
+void SetHardMode(bool on) {
+  g.hard = on;
+  SavePref();
+  LOGI("cheats: hard mode %s", on ? "ON" : "off");
+  // This runs from the switch's own callback -- inside guest execution, on a
+  // thread already holding the runtime lock. Calling the guest from here
+  // deadlocked and froze the game. Record the intent; the tick does the work.
+  if (!on) g.want_restore = true;
+}
 
 void InstallHardMode(Runtime& rt, const std::string& files_dir) {
   g.rt = &rt;
-  g.save_path = files_dir + "/hardmode.cfg";
+  g.save_path = files_dir + "/cheats.cfg";
   LoadPref();
 
-  // A guest-callable address for the switch to invoke. This is the same
-  // mechanism the 99 imports use: the engine sees a function pointer, calling
-  // it lands in a host hook, and the hook returns to LR like any leaf call.
-  rt.AddTrapRegion(kCbBase, 0x1000, [](Runtime& r, uint32_t) {
-    const uint32_t a0 = r.Arg(0), a1 = r.Arg(1), a2 = r.Arg(2);
-    LOGI("hard mode: switch callback(%u, %u, 0x%08x)", a0, a1, a2);
-    SetHardMode(a0 != 0);
+  // Guest-callable addresses for the switches. Same mechanism as the 99
+  // imports: the engine sees a function pointer, calling it lands in host code
+  // that returns to LR like any leaf call.
+  rt.AddTrapRegion(kCbBase, 0x1000, [](Runtime& r, uint32_t addr) {
+    const uint32_t state = r.Arg(0);
+    switch (addr) {
+      case kCbHardMode: SetHardMode(state != 0); break;
+      case kCbCapsules: SetFullCapsules(state != 0); break;
+      case kCbShield:   SetShieldFromSlider(state); break;
+      default: LOGW("cheats: callback at unmapped 0x%08x", addr); break;
+    }
     r.Ret(0);
   }, false);
 
   const uint32_t at = rt.SymAddr(kInitSettingsMenu);
-  if (!at) { LOGW("hard mode: %s not found", kInitSettingsMenu); return; }
+  if (!at) { LOGW("cheats: %s not found", kInitSettingsMenu); return; }
   // The game state is never handed to us, but it is r0 of every function that
-  // takes a SHOGUN*. Watching one of them is enough, and this one runs once
-  // the menus exist. The watch only records -- calling into the guest from
-  // here would deadlock on the runtime lock this thread already holds.
+  // takes a SHOGUN*. The watch only records -- calling into the guest from
+  // here would deadlock on the lock this thread already holds.
   rt.AddWatch(at, [](Runtime& r) {
     if (!g.shogun) {
       g.shogun = r.Arg(0);
-      LOGI("hard mode: SHOGUN=0x%08x (from InitSettingsMenu)", g.shogun);
+      LOGI("cheats: SHOGUN=0x%08x", g.shogun);
     }
   });
-  LOGI("hard mode: watching %s @0x%08x", kInitSettingsMenu, at);
+  LOGI("cheats: watching %s @0x%08x", kInitSettingsMenu, at);
+
+  // Every new game runs InitPlayerGame(PLAYER*), which is both where the
+  // PLAYER pointer becomes knowable and the moment "at the start" means.
+  const uint32_t pg = rt.SymAddr(kInitPlayerGame);
+  if (pg) {
+    rt.AddWatch(pg, [](Runtime& r) {
+      g.player = r.Arg(0);
+      g.player_fresh = true;      // acted on from the tick, not here
+      g.shield_prev = -1;
+    });
+    LOGI("cheats: watching %s @0x%08x", kInitPlayerGame, pg);
+  }
 }
 
 // Called from the tick, between guest calls -- never from inside one.
 void HardModeTick(uint64_t ticks) {
-  if (!g.rt) return;
-  if (ticks == 240) DumpOnce();      // once the menus have been built
+  if (!g.rt || !g.shogun) return;
+  if (ticks == 240) DumpOnce();
+  if ((ticks % 60) == 0) BuildLines();
 
-  // The settings menu is rebuilt whenever it is constructed afresh, which
-  // resets the line count and drops our entry. Re-adding when it is missing is
-  // cheaper and far more robust than trying to hook every rebuild.
-  if ((ticks % 60) == 0) AppendLine();
-
-  // onUpdate re-asserts a floor of 20.0 on the later missions, so setting this
-  // once would not survive. Re-applying is two instructions in the guest.
   if (g.want_restore) {
     g.want_restore = false;
     uint32_t out = 0;
-    CallQuiet("BH_SetMinRank", {kBhHandle, 1u << 16}, &out);
-    LOGI("hard mode: rank floor handed back to the engine");
+    CallQuiet("BH_SetMinRank", {kBhHandle, kRankBase}, &out);
+    LOGI("cheats: rank floor handed back to the engine");
   }
-  if (g.enabled && (ticks % 30) == 0) {
+  // onUpdate re-asserts a floor of 20.0 on the later missions, so setting this
+  // once would not survive. Re-applying is two instructions in the guest.
+  if (g.hard && (ticks % 30) == 0) {
     uint32_t out = 0;
     CallQuiet("BH_SetMinRank", {kBhHandle, g.rank}, &out);
   }
-}
 
-bool HardModeEnabled() { return g.enabled; }
+  if (!g.player) return;
 
-void SetHardMode(bool on) {
-  g.enabled = on;
-  if (!g.save_path.empty()) {
-    FILE* f = std::fopen(g.save_path.c_str(), "wb");
-    if (f) { std::fprintf(f, "%d %u\n", on ? 1 : 0, g.rank); std::fclose(f); }
+  // "At the start": InitPlayerGame has just set capsules to 3 and the shield
+  // to full. Top the capsules up once, here rather than in the watch, because
+  // the watch runs before the function that would overwrite it.
+  if (g.player_fresh) {
+    g.player_fresh = false;
+    if (g.caps) {
+      WrU32(g.player + kPlayerCapsules, kMaxCapsules);
+      LOGI("cheats: capsules set to %u", kMaxCapsules);
+    }
   }
-  LOGI("hard mode: %s", on ? "ON" : "off");
-  // Turning it off has to hand the rank floor back to the engine -- but this
-  // runs from the switch's own callback, i.e. from *inside* guest execution on
-  // a thread that already holds the runtime lock. Calling the guest from here
-  // deadlocked and froze the game. Record the intent; the tick does the work.
-  if (!on) g.want_restore = true;
+
+  // Shield strength. The engine subtracts damage from PLAYER+0x8c; rather than
+  // find and patch every damage site, watch the value and give back the part
+  // the multiplier says should not have been taken. mult>1 is tougher.
+  if (g.shield_mult != 1.0) {
+    const int32_t cur = static_cast<int32_t>(RdU32(g.player + kPlayerShield));
+    if (g.shield_prev >= 0 && cur < g.shield_prev && cur >= 0) {
+      const int32_t dmg = g.shield_prev - cur;
+      int32_t scaled = static_cast<int32_t>(dmg / g.shield_mult);
+      if (scaled < 1) scaled = 1;              // never make the player immortal
+      int32_t adjusted = g.shield_prev - scaled;
+      if (adjusted > kShieldFull) adjusted = kShieldFull;
+      if (adjusted < 0) adjusted = 0;
+      WrU32(g.player + kPlayerShield, static_cast<uint32_t>(adjusted));
+      g.shield_prev = adjusted;
+      return;
+    }
+    g.shield_prev = cur;
+  }
 }
+
+bool HardModeEnabled() { return g.hard; }
 
 }  // namespace shogun
