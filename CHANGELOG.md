@@ -25,29 +25,48 @@ The first build that runs the game end to end on a 64-bit-only Android device.
 - Desktop Python harness the whole design was proven on, 39/39 checks passing.
 
 ### Added (gameplay)
-- **A "Cheats" tab in the game's own settings menu**, beside Controls and
-  Options, holding Hard Mode, Full Capsules and a Shield strength slider. The
-  tab count is a plain field at `SHOGUN+0x8ba34`, so a third tab can be
-  declared; the memory it needs (`0x8c500..0x8ca68`) was checked against every
-  function in the binary and nothing else addresses it. Tab 3 onward belongs to
-  the info box and What's New, so exactly one spare tab exists.
-- **Full Capsules** sets the player's capsule count (`PLAYER+0x74`, which
-  `InitPlayerGame` sets to 3) to its maximum at the start of a game.
-- **Shield strength**, 0.2x to 5x with the knob centred at no change. Rather
-  than find and patch every damage site, the shield value (`PLAYER+0x8c`) is
-  watched and the share of each hit the multiplier says should not have landed
-  is given back.
-- **A "Hard Mode" switch in the game's own Options tab.** The game has no hard
-  mode as such: it has *rank*, a dynamic difficulty value that rises as you
-  play well, and the engine pins it to its ceiling from mission 3 onward. The
-  switch applies that same floor from the first mission.
-- The line is a real one, built with the engine's own
-  `InitSwitchSettingsLine` and appended to the settings array at runtime -- the
-  per-tab line count is a `uint16` in memory rather than a compiled-in bound.
-  No binary patching is involved.
-- `Runtime::AddWatch` (observe a guest function without disturbing it) and
-  `Runtime::SymAddr`, which is how the host learns the address of the game
-  state the engine never hands out.
+
+**A "Cheats" tab in the game's own settings menu**, beside Controls and
+Options. Not an overlay: the tab, both switches and the slider are built by the
+engine's own constructors and driven through trap-page callbacks, so they are
+registered, rendered and hit-tested exactly like the game's own. Nothing in the
+binary is patched.
+
+| Line | What it does |
+|---|---|
+| **Hard Mode** | Applies the engine's own difficulty ceiling from mission 1 |
+| **Full Capsules** | Starts a game with the capsule count maxed |
+| **Shield** | Slider, 0.2x to 5x, centred at no change; the label shows the percentage |
+
+How each one works:
+
+- **Hard Mode.** The game has no hard mode as such -- it has *rank*, a 16.16
+  dynamic-difficulty value at `PLAYER+0x90` that rises when you kill things and
+  falls when you are hit, clamped to `[BH_GetMinRank(), BH_GetMaxRank()]`
+  (measured live: 1.0 and 20.0). `onUpdate` pins the floor to 20.0 -- the
+  ceiling -- once you are past mission 1, which is the difficulty jump players
+  notice. The switch applies that same floor from the start, re-asserted every
+  30 ticks because `onUpdate` overwrites it on the later missions.
+- **Full Capsules** writes `PLAYER+0x74` at the start of a game, which is where
+  `InitPlayerGame` sets it to 3.
+- **Shield strength** watches `PLAYER+0x8c` and gives back the share of each
+  hit the multiplier says should not have landed, which avoids having to find
+  and patch every damage site. It never refunds a whole hit, so you can still
+  die. The engine draws no number beside a slider, so the value goes into the
+  line's own label.
+
+What made it possible, all of it data rather than code:
+
+- The tab count is a plain field at `SHOGUN+0x8ba34`. The memory a third tab
+  needs (`0x8c500..0x8ca68`) was checked against every function in the binary
+  and nothing addresses it; tab 3 onward belongs to the info box and What's
+  New, so exactly one spare tab exists.
+- Each tab holds up to 14 `SETTINGSLINE`s at `tab+0x1c`, stride `0x60`, with
+  its line count a `uint16` at `tab+8` rather than a compiled-in bound.
+- `Runtime::AddWatch` observes a guest function without disturbing it -- how
+  the host learns the addresses of the game state and the player, which the
+  engine never hands out -- and `Runtime::SymAddr` resolves any of the 8,777
+  symbols by name.
 
 ### Fixed
 - **Using the shield slider froze the game.** A slide-bar's last three
