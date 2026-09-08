@@ -101,6 +101,15 @@ const char* kInitSliderLine =
 const char* kInitPlayerGame = "_Z14InitPlayerGameP6PLAYER";
 const char* kInitTextLine =
     "_Z20InitTextSettingsLineP12SETTINGSLINEPciiiiS1_jS1_";
+const char* kInitWorldFile = "_Z13InitWorldFileP6SHOGUNPc";
+
+// A partition -- the level's event timeline -- lives in the BH context.
+// BH_SavePartition(handle, name) writes UE_SaveBinFile(name, &count,
+// 2 + count*12), so the whole format is a uint16 count followed by that many
+// 12-byte events. Reading it straight out of guest memory needs no file, which
+// matters because the app is not debuggable and adb cannot see its storage.
+constexpr uint32_t kPartCountOff = 0x10168;
+constexpr uint32_t kEventSize    = 12;
 
 struct State {
   Runtime* rt = nullptr;
@@ -119,6 +128,9 @@ struct State {
   int32_t  shield_prev = -1;
   uint32_t shield_line = 0;    // so its label can show the current value
   std::string save_path;
+  std::string world;           // level name, from the InitWorldFile watch
+  bool     want_dump = false;
+  bool     dumped_part = false;
 };
 State g;
 
@@ -158,6 +170,52 @@ void DumpOnce() {
     LOGI("  tab %u '%s': %u lines", t,
          g.rt->CStr(tab + kTabLabelAt, 15).c_str(), RdU16(tab + kTabCountAt));
   }
+}
+
+// Dump the current level's event timeline. This is the first step towards
+// authoring one: the format documents itself far better from a real example
+// than from reading the loader.
+void DumpPartition() {
+  uint32_t ctx = 0;
+  if (!CallQuiet("UE_GetHandlePtr", {kBhHandle, 0}, &ctx) || !ctx) {
+    LOGW("partition: no BH context");
+    return;
+  }
+  const uint32_t count = RdU16(ctx + kPartCountOff);
+  if (count == 0 || count > 4096) {
+    LOGI("partition: '%s' has %u events (nothing to dump yet)",
+         g.world.c_str(), count);
+    return;
+  }
+  g.dumped_part = true;
+  LOGI("partition '%s': %u events, %u bytes at 0x%08x", g.world.c_str(), count,
+       2 + count * kEventSize, ctx + kPartCountOff);
+  std::vector<uint8_t> ev(count * kEventSize);
+  if (!g.rt->Read(ctx + kPartCountOff + 2, ev.data(), ev.size())) {
+    LOGW("partition: read failed");
+    return;
+  }
+  // Three words per event; print them decoded as well as raw so the fields
+  // are recognisable at a glance.
+  const uint32_t show = count < 24 ? count : 24;
+  for (uint32_t i = 0; i < show; i++) {
+    uint32_t w[3];
+    std::memcpy(w, ev.data() + i * kEventSize, kEventSize);
+    LOGI("  ev %3u  %08x %08x %08x  |  t=%u a=%d b=%d", i, w[0], w[1], w[2],
+         w[0], static_cast<int32_t>(w[1]), static_cast<int32_t>(w[2]));
+  }
+  // Whole thing as hex, in lines adb can reassemble into a file.
+  std::string line;
+  char b[8];
+  for (size_t i = 0; i < ev.size(); i++) {
+    std::snprintf(b, sizeof b, "%02x", ev[i]);
+    line += b;
+    if (line.size() >= 96 || i + 1 == ev.size()) {
+      LOGI("PART %s", line.c_str());
+      line.clear();
+    }
+  }
+  LOGI("partition: dump complete (%u events)", count);
 }
 
 // ---- building the tab ----------------------------------------------------
@@ -424,6 +482,18 @@ void InstallHardMode(Runtime& rt, const std::string& files_dir) {
 
   // Every new game runs InitPlayerGame(PLAYER*), which is both where the
   // PLAYER pointer becomes knowable and the moment "at the start" means.
+  // InitWorldFile(SHOGUN*, char* name) runs as a level is set up, and its
+  // second argument names the level.
+  const uint32_t wf = rt.SymAddr(kInitWorldFile);
+  if (wf) {
+    rt.AddWatch(wf, [](Runtime& r) {
+      g.world = r.CStr(r.Arg(1), 64);
+      g.want_dump = true;        // acted on from the tick
+      g.dumped_part = false;
+    });
+    LOGI("cheats: watching %s @0x%08x", kInitWorldFile, wf);
+  }
+
   const uint32_t pg = rt.SymAddr(kInitPlayerGame);
   if (pg) {
     rt.AddWatch(pg, [](Runtime& r) {
@@ -440,6 +510,12 @@ void HardModeTick(uint64_t ticks) {
   if (!g.rt || !g.shogun) return;
   if (ticks == 240) DumpOnce();
   if ((ticks % 60) == 0) BuildLines();
+
+  // The partition is loaded during InitWorldFile, so dump a little after it.
+  if (g.want_dump && !g.dumped_part && (ticks % 30) == 0) {
+    LOGI("level: '%s' starting", g.world.c_str());
+    DumpPartition();
+  }
 
   if (g.want_restore) {
     g.want_restore = false;

@@ -68,6 +68,16 @@ What made it possible, all of it data rather than code:
   engine never hands out -- and `Runtime::SymAddr` resolves any of the 8,777
   symbols by name.
 
+### Added (tooling)
+- **Level dumping**, the first step towards authoring one. `BH_SavePartition`
+  gives the format away: it calls `UE_SaveBinFile(name, &count, 2 + count*12)`,
+  so a partition -- a level's event timeline -- is a `uint16` event count
+  followed by that many 12-byte events. The dumper reads it straight out of the
+  BH context rather than through a file, because the app is not debuggable and
+  adb cannot reach its private storage; the events go to logcat both decoded
+  and as hex that can be reassembled into a binary. A watch on
+  `InitWorldFile(SHOGUN*, char*)` supplies the level name.
+
 ### Fixed
 - **Using the shield slider froze the game.** A slide-bar's last three
   arguments are `(onMove, onRelease, user)`, not `(callback, user, spare)` --
