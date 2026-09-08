@@ -157,12 +157,12 @@ One run over the volcano level captured **215 names** and resolved
 
 ```
 timeline 'worlds/volcano/scripts/volcano.world': 155/172 events named
-  t=75    where=112  flags=0x0   worlds/ocean/scriptsbadguy01c
-  t=78    where=108  flags=0x20  worlds/ocean/scriptsbadguy01c
-  t=78    where=116  flags=0x20  worlds/ocean/scriptsbadguy01c
-  t=81    where=104  flags=0x40  worlds/ocean/scriptsbadguy01c
-  t=81    where=120  flags=0x40  worlds/ocean/scriptsbadguy01c
-  t=81    where=128  flags=0x0   worlds/ocean/scriptsbadguy02
+  t=75    where=112  flags=0x0   worlds/ocean/scripts/badguy01c
+  t=78    where=108  flags=0x20  worlds/ocean/scripts/badguy01c
+  t=78    where=116  flags=0x20  worlds/ocean/scripts/badguy01c
+  t=81    where=104  flags=0x40  worlds/ocean/scripts/badguy01c
+  t=81    where=120  flags=0x40  worlds/ocean/scripts/badguy01c
+  t=81    where=128  flags=0x0   worlds/ocean/scripts/badguy02
 ```
 
 That is a **V formation**, authored by hand: one enemy at x=112, then a
