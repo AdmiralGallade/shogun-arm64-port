@@ -99,6 +99,8 @@ const char* kInitSwitchLine =
 const char* kInitSliderLine =
     "_Z24InitSlideBarSettingsLineP12SETTINGSLINEPciiiijS1_PvS2_S2_iii";
 const char* kInitPlayerGame = "_Z14InitPlayerGameP6PLAYER";
+const char* kInitTextLine =
+    "_Z20InitTextSettingsLineP12SETTINGSLINEPciiiiS1_jS1_";
 
 struct State {
   Runtime* rt = nullptr;
@@ -115,6 +117,7 @@ struct State {
   uint32_t player = 0;        // learned from the InitPlayerGame watch
   bool     player_fresh = false;
   int32_t  shield_prev = -1;
+  uint32_t shield_line = 0;    // so its label can show the current value
   std::string save_path;
 };
 State g;
@@ -223,6 +226,18 @@ bool AddSwitch(const char* name, const char* label, uint32_t handle,
   return true;
 }
 
+// The engine draws no number beside a slider -- its own sliders are all
+// unlabelled -- so the value goes in the line's own label. That is the inline
+// buffer at line+0x20, a plain 32-byte string, so this is a memory write and
+// needs no call into the guest.
+void UpdateShieldLabel() {
+  if (!g.shield_line) return;
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "Shield %d%%",
+                static_cast<int>(g.shield_mult * 100.0 + 0.5));
+  g.rt->Write(g.shield_line + 0x20, buf, std::strlen(buf) + 1);
+}
+
 // Inverse of SetShieldFromSlider, so a saved multiplier restores the knob.
 uint32_t ShieldToSlider(double mult) {
   const double frac = mult < 1.0 ? (mult - 0.2) / 0.8 * 0.5
@@ -264,7 +279,34 @@ bool AddSlider(const char* name, const char* label, uint32_t handle,
     return false;
   }
   WrU16(tab + kTabCountAt, static_cast<uint16_t>(n + 1));
+  g.shield_line = line;
+  UpdateShieldLabel();
   LOGI("cheats: slider '%s' as line %u @0x%08x y=%u", label, n, line, y);
+  return true;
+}
+
+// An empty row at the end. The OK button is pinned to the settings box's
+// bottom-right corner, so whatever control sits on the last row gets covered
+// by it -- that is what put OK on top of the Hard Mode switch in Options, and
+// on the Shield slider here. A blank final row gives OK somewhere to land.
+bool AddSpacer() {
+  const uint32_t tab = TabAt(kOurTab);
+  const uint16_t n = RdU16(tab + kTabCountAt);
+  if (n >= kLineCap) return false;
+  const uint32_t line = tab + kLinesOff + n * kLineStride;
+  const uint32_t nm = GuestStr("CheatsPad"), empty = GuestStr("");
+  if (!nm || !empty) return false;
+  // InitTextSettingsLine(line, name, x, y, w, h, label, value, valueText)
+  uint32_t out = 0;
+  std::string err;
+  if (!g.rt->CallSym(kInitTextLine,
+                     {line, nm, kRowX, kFirstRowY + n * kRowStep, kRowW, kRowH,
+                      empty, 0, empty}, &out, &err)) {
+    LOGW("cheats: spacer failed: %s", err.c_str());
+    return false;
+  }
+  WrU16(tab + kTabCountAt, static_cast<uint16_t>(n + 1));
+  LOGI("cheats: spacer as line %u (keeps OK off the last control)", n);
   return true;
 }
 
@@ -278,6 +320,7 @@ void BuildLines() {
   AddSwitch("MaxCapsules", "Full Capsules", kSwCapsules, kCbCapsules, g.caps);
   AddSlider("ShieldStrength", "Shield", kSlShield, kCbShieldMv, kCbShieldRel,
             ShieldToSlider(g.shield_mult));
+  AddSpacer();
 }
 
 // ---- preference ----------------------------------------------------------
@@ -322,6 +365,7 @@ void SetShieldFromSlider(uint32_t raw) {
   g.shield_mult = frac < 0.5 ? 0.2 + (frac / 0.5) * 0.8    // 0.2x .. 1x
                              : 1.0 + ((frac - 0.5) / 0.5) * 4.0;  // 1x .. 5x
   SavePref();
+  UpdateShieldLabel();
   LOGI("cheats: shield slider raw=0x%x -> %.2fx (%+.0f%%)", raw, g.shield_mult,
        (g.shield_mult - 1.0) * 100.0);
 }
