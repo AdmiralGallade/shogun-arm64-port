@@ -24,7 +24,25 @@ The first build that runs the game end to end on a 64-bit-only Android device.
   Android robot, because the manifest declared no icon at all.
 - Desktop Python harness the whole design was proven on, 39/39 checks passing.
 
+### Added (gameplay)
+- **A "Hard Mode" switch in the game's own Options tab.** The game has no hard
+  mode as such: it has *rank*, a dynamic difficulty value that rises as you
+  play well, and the engine pins it to its ceiling from mission 3 onward. The
+  switch applies that same floor from the first mission.
+- The line is a real one, built with the engine's own
+  `InitSwitchSettingsLine` and appended to the settings array at runtime -- the
+  per-tab line count is a `uint16` in memory rather than a compiled-in bound.
+  No binary patching is involved.
+- `Runtime::AddWatch` (observe a guest function without disturbing it) and
+  `Runtime::SymAddr`, which is how the host learns the address of the game
+  state the engine never hands out.
+
 ### Fixed
+- **Toggling a host-provided settings switch froze the game.** The switch
+  callback runs inside guest execution, on a thread already holding the runtime
+  lock; calling back into the guest from there deadlocked. Guest calls are now
+  deferred to the tick, and `Runtime::CallAddr` refuses a re-entrant call with
+  an error instead of hanging.
 - **Saves were never written.** The engine forms a save path by pasting the
   storage directory it is handed onto a file name, with no separator of its
   own, so `.../files` + `settings.sav` became `.../filessettings.sav`. The path

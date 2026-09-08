@@ -78,11 +78,24 @@ class Runtime {
   ShimFn ShimFor(const std::string& import_name) const;
   void AddTrapRegion(uint32_t base, uint32_t size, TrapFn fn, bool already_mapped);
 
+  // Observe a guest function without disturbing it: the callback runs at
+  // `addr` with the guest's registers intact and execution continues normally.
+  // Unlike a trap region this does NOT return to LR -- it is a watch, not a
+  // replacement -- which is how the host learns pointers the guest never
+  // hands out, such as the address of the game state.
+  //
+  // The callback runs *inside* guest execution, so it must not call back into
+  // the guest: CallSym takes the runtime lock this thread already holds.
+  // Record what you need and act on it from the caller's own thread.
+  void AddWatch(uint32_t addr, ShimFn fn);
+
   // ---- introspection -----------------------------------------------------
   uc_engine* uc() const { return uc_; }
   const std::vector<std::string>& imports() const { return imports_; }
   uint32_t TrapOf(const std::string& import_name) const;
   bool     HasSym(const char* name) const { return syms_.count(name) != 0; }
+  // Guest address of a symbol, Thumb bit included; 0 if absent.
+  uint32_t SymAddr(const char* name) const;
   uint32_t ExidxBase() const { return exidx_base_; }
   uint32_t ExidxCount() const { return exidx_count_; }
   uint32_t ErrnoAddr() const { return errno_addr_; }
@@ -102,6 +115,7 @@ class Runtime {
   void ServiceImport(uint32_t trap_addr);
 
   static void HookTrap(uc_engine*, uint64_t addr, uint32_t size, void* user);
+  static void HookWatch(uc_engine*, uint64_t addr, uint32_t size, void* user);
   static bool HookBadMem(uc_engine*, uc_mem_type, uint64_t addr, int size,
                          int64_t value, void* user);
 
@@ -127,6 +141,7 @@ class Runtime {
 
   struct TrapRegion { uint32_t lo, hi; TrapFn fn; };
   std::vector<TrapRegion> trap_regions_;
+  std::unordered_map<uint32_t, ShimFn> watches_;
 
   // heap: first-fit with a free list, matching the Python allocator
   struct Block { uint32_t size; bool free; };

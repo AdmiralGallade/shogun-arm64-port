@@ -75,6 +75,9 @@ Two write-ups go deeper:
   order, and which findings decided what happened next.
 - **[docs/PORTING.md](docs/PORTING.md)** — the address map and the nine
   findings that cost the most to learn.
+- **[docs/MODDING.md](docs/MODDING.md)** — what can be changed and how, from
+  calling the engine's own 90-function gameplay API to adding a line to the
+  game's own settings menu.
 
 ---
 
@@ -174,7 +177,7 @@ gitignored, and you need the same one to sign any later update.
 | `bench/` | Trap-cost benchmark — the number that decides whether 60 fps is reachable |
 | `tools/` | Asset extraction, icon generation, changelog patching |
 | `device-test.py` | Everything about a connected device that adb alone can establish |
-| `docs/` | How it was done, the porting findings, and the harness notes |
+| `docs/` | How it was done, the porting findings, what can be modded, harness notes |
 
 ---
 

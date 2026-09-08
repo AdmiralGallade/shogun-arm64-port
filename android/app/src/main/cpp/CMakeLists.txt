@@ -15,7 +15,8 @@ add_library(shogun SHARED
     shogun_runtime.cpp
     shims.cpp
     jni_bridge.cpp
-    gl.cpp)
+    gl.cpp
+    hardmode.cpp)
 
 target_include_directories(shogun PRIVATE "${UNICORN_INC}")
 target_compile_options(shogun PRIVATE -O2 -fno-exceptions -fno-rtti)

@@ -84,4 +84,10 @@ void GlContextLost();
 // Lets the JNI layer hand the asset-pack descriptor to fdopen (shims.cpp).
 void RegisterAssetFd(int fd, FILE* f);
 
+// Difficulty control and its settings line (hardmode.cpp).
+void InstallHardMode(Runtime& rt, const std::string& files_dir);
+void HardModeTick(uint64_t ticks);
+bool HardModeEnabled();
+void SetHardMode(bool on);
+
 }  // namespace shogun

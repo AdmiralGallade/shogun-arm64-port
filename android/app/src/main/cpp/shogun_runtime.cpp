@@ -237,6 +237,25 @@ void Runtime::EnableVfp() {
 }
 
 // ------------------------------------------------------------------ traps
+uint32_t Runtime::SymAddr(const char* name) const {
+  auto it = syms_.find(name);
+  return it == syms_.end() ? 0u : kImageBase + it->second.value;
+}
+
+void Runtime::AddWatch(uint32_t addr, ShimFn fn) {
+  const uint32_t at = addr & ~1u;          // callers pass the Thumb bit along
+  watches_[at] = std::move(fn);
+  uc_hook h = 0;
+  uc_hook_add(uc_, &h, UC_HOOK_CODE, (void*)&Runtime::HookWatch, this, at, at);
+}
+
+void Runtime::HookWatch(uc_engine*, uint64_t addr, uint32_t, void* user) {
+  auto* rt = static_cast<Runtime*>(user);
+  auto it = rt->watches_.find(static_cast<uint32_t>(addr));
+  if (it != rt->watches_.end()) it->second(*rt);
+  // deliberately no PC write: the guest carries on into the real function
+}
+
 void Runtime::HookTrap(uc_engine* uc, uint64_t addr, uint32_t, void* user) {
   auto* rt = static_cast<Runtime*>(user);
   uint32_t lr = 0, cpsr = 0;
@@ -379,8 +398,20 @@ uint32_t Runtime::StackForThisThread() {
   return kStackTop - slot * kSlice - 0x1000;
 }
 
+// A shim or hook that calls back into the guest would re-lock mu_ on a thread
+// that already holds it and hang the whole game -- which is exactly what a
+// settings-switch callback did. Depth is per-thread, so the legitimate case of
+// two threads entering the guest still serialises on the lock as before.
+thread_local int t_guest_depth = 0;
+
 bool Runtime::CallAddr(uint32_t addr, bool thumb, const std::vector<uint32_t>& args,
                        uint32_t* out_r0, std::string* err) {
+  if (t_guest_depth > 0) {
+    if (err) *err = "re-entrant guest call (a shim called back into the guest)";
+    return false;
+  }
+  struct Depth { Depth() { t_guest_depth++; } ~Depth() { t_guest_depth--; } } depth;
+
   std::lock_guard<std::mutex> lock(mu_);
   uint32_t sp = StackForThisThread();
   if (args.size() > 4) {

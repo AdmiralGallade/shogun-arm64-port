@@ -105,6 +105,7 @@ Java_net_int13_shogun_ShogunNative_nativeInit(
   g_app->files_dir = files;
   shogun::InstallShims(g_app->rt, files);
   shogun::InstallGl(g_app->rt);
+  shogun::InstallHardMode(g_app->rt, files);
   g_app->jni = std::make_unique<shogun::JniBridge>(g_app->rt, env, activity);
 
   // 3. the asset pack, as a standalone file the engine can seek freely
@@ -163,7 +164,8 @@ Java_net_int13_shogun_ShogunNative_nativeTick(JNIEnv* env, jclass) {
                  {g_app->jni->env_guest(), self}))
     g_app->booted = false;         // stop hammering a dead engine
   g_app->tick_ms += NowMs() - t0;
-  if (++g_app->ticks % 120 == 0) {
+  shogun::HardModeTick(++g_app->ticks);
+  if (g_app->ticks % 120 == 0) {
     // 512 samples at 22050 Hz is 23.2 ms of audio: if a tick routinely costs
     // more than that, the mixer cannot keep the track fed and you hear it.
     LOGI("tick %llu  draws %llu  heap %u KB  |  tick %.1f ms  audio %.2f ms x%llu",
