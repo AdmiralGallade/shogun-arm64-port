@@ -175,9 +175,18 @@ bool EnsureTab() {
     return false;
   }
   const uint32_t tab = TabAt(kOurTab);
-  // Start from a clean slate: this tab has never been initialised.
-  const std::vector<uint8_t> zero(kTabStride, 0);
-  g.rt->Write(tab, zero.data(), zero.size());
+  // Inherit the header from a tab the engine built itself. The first 0x1c
+  // bytes carry per-tab display geometry -- the settings box among it -- and
+  // zeroing them collapsed the panel to a single row, so the lines below the
+  // first drew on bare background and OK, which is pinned to the box's
+  // bottom-right corner, ended up on top of the first row and unclickable.
+  // Tab 1 is copied rather than tab 0 because tab 0's +4 holds the global tab
+  // count. Only the lines area is cleared.
+  std::vector<uint8_t> header(kLinesOff, 0);
+  g.rt->Read(TabAt(1), header.data(), header.size());
+  g.rt->Write(tab, header.data(), header.size());
+  const std::vector<uint8_t> zero(kTabStride - kLinesOff, 0);
+  g.rt->Write(tab + kLinesOff, zero.data(), zero.size());
   g.rt->Write(tab + kTabLabelAt, "Cheats", 7);
   WrU16(tab + kTabCountAt, 0);
   WrU32(g.shogun + kTabCountOff, kOurTab + 1);
