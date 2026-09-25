@@ -7,7 +7,8 @@
 Everything that makes the game a game — the engine, the artwork, the music,
 the level design, the asset pack — is theirs. int13 is no longer trading and
 the game was delisted; this project exists so a copy you already own does not
-become unplayable, and it distributes none of their material.
+become unplayable. It distributes none of their code or assets; the only thing
+of theirs here is a single screenshot of the result.
 
 ## 64-bit port
 

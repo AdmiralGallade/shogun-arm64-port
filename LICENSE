@@ -26,5 +26,6 @@ This license covers the porting work in this repository only.
 
 It does NOT cover "Shogun: Rise Of The Renegade" itself. The game, its engine
 binary (libHAL.Android.so), its artwork, music and asset pack remain the
-copyright of int13. None of that material is distributed here. You need your
-own legally obtained copy of the game to use any of this.
+copyright of int13. None of that material is distributed here, with the sole
+exception of one screenshot of the game running, included to show that the port
+works. You need your own legally obtained copy of the game to use any of this.

@@ -187,6 +187,7 @@ The porting code here is MIT licensed. The game is not mine and is not
 included — see [LICENSE](LICENSE) and [CREDITS.md](CREDITS.md).
 
 This exists to keep a purchased copy of a delisted 2012 game playable on
-hardware that dropped the instruction set it was built for. It ships no
-copyrighted content, defeats no DRM (the shipped build has none active), and
-is of no use to anyone without their own copy of the game.
+hardware that dropped the instruction set it was built for. It ships no game
+code or assets -- the one screenshot above is of the port running, included as
+evidence that it does -- defeats no DRM (the shipped build has none active),
+and is of no use to anyone without their own copy of the game.
