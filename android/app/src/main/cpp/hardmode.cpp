@@ -642,4 +642,8 @@ void HardModeTick(uint64_t ticks) {
 
 bool HardModeEnabled() { return g.hard; }
 
+// The leaderboard needs the same pointer this module already learns from its
+// InitSettingsMenu watch; there is no reason to watch for it twice.
+uint32_t CurrentShogun() { return g.shogun; }
+
 }  // namespace shogun

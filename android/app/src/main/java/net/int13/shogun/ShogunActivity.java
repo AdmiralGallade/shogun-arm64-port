@@ -29,6 +29,7 @@ public class ShogunActivity extends net.int13.HalActivity {
 
     private GLSurfaceView view;
     private AudioThread audio;
+    private Leaderboard leaderboard;
 
     // letterbox rect inside the surface, filled in on surfaceChanged
     private volatile int vpX, vpY, vpW = GAME_W, vpH = GAME_H;
@@ -99,7 +100,7 @@ public class ShogunActivity extends net.int13.HalActivity {
                         getFilesDir().getAbsolutePath(), GAME_W, GAME_H);
                 Log.i(TAG, "engine boot: " + ok);
                 started = ok;
-                if (ok) startAudio();
+                if (ok) { startAudio(); startLeaderboard(); }
             } catch (Exception e) {
                 Log.e(TAG, "boot failed", e);
             }
@@ -266,6 +267,13 @@ public class ShogunActivity extends net.int13.HalActivity {
         });
         try { done.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS); }
         catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+    }
+
+    /** Started once the engine is up; harmless when no endpoint is set. */
+    private void startLeaderboard() {
+        if (leaderboard != null) return;
+        leaderboard = new Leaderboard(Leaderboard.endpointFor(this));
+        if (leaderboard.enabled()) leaderboard.start();
     }
 
     @Override protected void onPause() {

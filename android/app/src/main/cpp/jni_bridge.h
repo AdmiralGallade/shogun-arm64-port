@@ -86,6 +86,19 @@ void RegisterAssetFd(int fd, FILE* f);
 
 // Difficulty control and its settings line (hardmode.cpp).
 void InstallHardMode(Runtime& rt, const std::string& files_dir);
+uint32_t CurrentShogun();
+
+// Leaderboard: the port does the networking, the engine renders the result
+// (leaderboard.cpp).
+void InstallLeaderboard(Runtime& rt);
+void LeaderboardTick(uint64_t ticks);
+std::string LeaderboardPending();   // what Java should POST, or empty
+void LeaderboardResult(const char* board, uint32_t your_best,
+                       uint32_t w_rank, uint32_t w_best, const char* w_name,
+                       uint32_t c_rank, uint32_t c_best, const char* c_name,
+                       uint32_t t_rank, uint32_t t_best, const char* t_name,
+                       const char* country, const char* city);
+std::string LeaderboardPlayerName();
 void HardModeTick(uint64_t ticks);
 bool HardModeEnabled();
 void SetHardMode(bool on);

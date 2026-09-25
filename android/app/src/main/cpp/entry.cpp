@@ -106,6 +106,7 @@ Java_net_int13_shogun_ShogunNative_nativeInit(
   shogun::InstallShims(g_app->rt, files);
   shogun::InstallGl(g_app->rt);
   shogun::InstallHardMode(g_app->rt, files);
+  shogun::InstallLeaderboard(g_app->rt);
   g_app->jni = std::make_unique<shogun::JniBridge>(g_app->rt, env, activity);
 
   // 3. the asset pack, as a standalone file the engine can seek freely
@@ -165,6 +166,7 @@ Java_net_int13_shogun_ShogunNative_nativeTick(JNIEnv* env, jclass) {
     g_app->booted = false;         // stop hammering a dead engine
   g_app->tick_ms += NowMs() - t0;
   shogun::HardModeTick(++g_app->ticks);
+  shogun::LeaderboardTick(g_app->ticks);
   if (g_app->ticks % 120 == 0) {
     // 512 samples at 22050 Hz is 23.2 ms of audio: if a tick routinely costs
     // more than that, the mixer cannot keep the track fed and you hear it.
@@ -236,6 +238,45 @@ Java_net_int13_shogun_ShogunNative_nativeAudio(JNIEnv* env, jclass,
              static_cast<uint32_t>(samples)});
   g_app->audio_ms += NowMs() - t0;
   g_app->audio_calls++;
+}
+
+// ---- leaderboard bridge --------------------------------------------------
+// Java owns the HTTPS call; native owns everything that touches the guest.
+
+JNIEXPORT jstring JNICALL
+Java_net_int13_shogun_ShogunNative_nativeLeaderboardPending(JNIEnv* env, jclass) {
+  const std::string s = shogun::LeaderboardPending();
+  return s.empty() ? nullptr : env->NewStringUTF(s.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_net_int13_shogun_ShogunNative_nativeLeaderboardName(JNIEnv* env, jclass) {
+  const std::string s = shogun::LeaderboardPlayerName();
+  return s.empty() ? nullptr : env->NewStringUTF(s.c_str());
+}
+
+JNIEXPORT void JNICALL
+Java_net_int13_shogun_ShogunNative_nativeLeaderboardResult(
+    JNIEnv* env, jclass, jstring board, jint your_best,
+    jint w_rank, jint w_best, jstring w_name,
+    jint c_rank, jint c_best, jstring c_name,
+    jint t_rank, jint t_best, jstring t_name,
+    jstring country, jstring city) {
+  auto get = [&](jstring j) -> std::string {
+    if (!j) return std::string();
+    const char* p = env->GetStringUTFChars(j, nullptr);
+    std::string s(p ? p : "");
+    env->ReleaseStringUTFChars(j, p);
+    return s;
+  };
+  const std::string b = get(board), wn = get(w_name), cn = get(c_name),
+                    tn = get(t_name), co = get(country), ci = get(city);
+  shogun::LeaderboardResult(
+      b.c_str(), static_cast<uint32_t>(your_best),
+      static_cast<uint32_t>(w_rank), static_cast<uint32_t>(w_best), wn.c_str(),
+      static_cast<uint32_t>(c_rank), static_cast<uint32_t>(c_best), cn.c_str(),
+      static_cast<uint32_t>(t_rank), static_cast<uint32_t>(t_best), tn.c_str(),
+      co.c_str(), ci.c_str());
 }
 
 JNIEXPORT void JNICALL

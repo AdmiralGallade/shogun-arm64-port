@@ -68,6 +68,26 @@ What made it possible, all of it data rather than code:
   engine never hands out -- and `Runtime::SymAddr` resolves any of the 8,777
   symbols by name.
 
+### Added (online)
+- **The leaderboard works again.** The game reached int13's "Hub Server" at a
+  hardcoded IP over NWT, their obfuscated binary packet protocol, and asked it
+  which address was serving leaderboards that day. Both are long gone.
+  Reviving it would have meant reversing the obfuscation *and* hosting raw TCP.
+- Instead the port does the networking over ordinary HTTPS and calls the
+  engine's own `onReceiveScore` -- the callback registered through the public
+  `LEADERBOARD_SetScoreReceivedCallback` -- with the answer. The guest never
+  opens a socket, and the game renders its real ranking screen.
+- Its thirteen arguments were recovered from the log lines it prints for each
+  of them ("World best: %d (%s)", "Country rank: %d (%s)" ...), which agree
+  exactly with the mangled parameter types.
+- `server/` holds a Cloudflare Worker that serves it on the free tier. Workers
+  supply `request.cf.country` and `request.cf.city` per request, which is
+  exactly the World/Country/City split the game wants, and geo from the edge
+  cannot be spoofed by the client. `server/test.mjs` runs it against an
+  in-memory KV with no account or network.
+- Off by default. Point it at an endpoint with a `leaderboard.txt` in the app's
+  external files directory, no rebuild required.
+
 ### Added (tooling)
 - **Level dumping**, the first step towards authoring one. `BH_SavePartition`
   gives the format away: it calls `UE_SaveBinFile(name, &count, 2 + count*12)`,

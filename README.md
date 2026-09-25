@@ -88,6 +88,11 @@ Running on a Pixel 10 Pro, Android 17 — `arm64-v8a` only, PowerVR GPU.
 | Audio callback | ~3 ms per 512-sample buffer |
 | Emulated throughput | ~1650–2000 MIPS, against the ~600 MIPS it was written for |
 
+The **online leaderboard works again** — not by reviving int13's dead Hub
+Server, but by doing the networking in the port and feeding the engine's own
+`onReceiveScore` callback. Runs on a free Cloudflare Worker; see
+[server/](server/). Off by default until you point it at an endpoint.
+
 There is also a **Cheats tab** in the game's own settings menu — Hard Mode,
 Full Capsules and a shield-strength slider — built with the engine's own widget
 constructors rather than drawn over the top of it. See
@@ -182,6 +187,7 @@ gitignored, and you need the same one to sign any later update.
 | **[PORTING.md](docs/PORTING.md)** | The guest address map, and the nine findings that cost the most to learn |
 | **[MODDING.md](docs/MODDING.md)** | What can be changed and how — the engine's 90-function gameplay API, adding to the game's own menus, and the level format |
 | **[HARNESS.md](docs/HARNESS.md)** | The desktop Python harness the whole design was proven on first |
+| **[server/README.md](server/README.md)** | Why the original leaderboard is unreachable, and the free replacement that stands in for it |
 
 ## Repository layout
 

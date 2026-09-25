@@ -22,5 +22,18 @@ public final class ShogunNative {
 
     /** Flush the engine's persistent data to disk. */
     public static native void nativeSave();
+
+    // ---- leaderboard: Java does the HTTPS, native does the engine ----------
+    /** "board
+score" when the game has a score to send, else null. */
+    public static native String nativeLeaderboardPending();
+    /** The nickname the player entered, or null before one is set. */
+    public static native String nativeLeaderboardName();
+    public static native void nativeLeaderboardResult(
+            String board, int yourBest,
+            int worldRank, int worldBest, String worldBestName,
+            int countryRank, int countryBest, String countryBestName,
+            int cityRank, int cityBest, String cityBestName,
+            String countryName, String cityName);
     public static native boolean nativeBooted();
 }
