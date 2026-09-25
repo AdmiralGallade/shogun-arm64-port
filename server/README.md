@@ -108,6 +108,29 @@ anything, which is what opening the leaderboard screen does.
 
 `GET /v1/health` returns `{"ok":true,...}`.
 
+## Testing it locally first
+
+`wrangler dev --local` runs the real Cloudflare runtime with an emulated KV, no
+account needed:
+
+```bash
+cd server
+npm install wrangler
+npx wrangler dev --local --port 8787
+
+curl -s -X POST http://127.0.0.1:8787/v1/score   -H 'content-type: application/json'   -d '{"board":"total","name":"You","score":7279}'
+```
+
+> **Use a short directory path.** Under a long path (a OneDrive-backed temp
+> directory, for instance) miniflare's local KV fails every read with
+> `internal error` and every write with `Network connection lost` — which looks
+> exactly like a bug in the Worker and is not one. Moving the same files to
+> `C:\lbtest` fixed it outright. This affects local dev only, never a deploy.
+
+In local mode miniflare supplies a placeholder `request.cf`, so the country and
+city come back as something like `CA` / `Willowdale`. Real geo appears once
+deployed.
+
 ## Tests
 
 `test.mjs` runs the Worker against an in-memory stand-in for KV — no account,

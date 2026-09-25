@@ -48,6 +48,11 @@ bench/trapbench
 bench/cpubench-*
 bench/*.pdb
 
+# Worker tooling
+node_modules/
+.wrangler/
+package-lock.json
+
 # Tooling
 __pycache__/
 *.py[cod]
