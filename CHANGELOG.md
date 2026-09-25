@@ -84,6 +84,15 @@ What made it possible, all of it data rather than code:
   showing hand-authored V formations: a lead enemy, then symmetric pairs
   widening either side of it a few ticks apart.
 
+### Changed
+- **The port has its own identity.** It was shipping as `net.int13.shogun`
+  labelled "Shogun" -- byte-identical to the original's, so installing it
+  replaced the real game rather than sitting beside it, and nothing in the
+  launcher told the two apart. It is now `dev.admiralgallade.shogun64`,
+  labelled **Shogun 64**. The Java classes stay under `net.int13.*` because JNI
+  resolves by class name and the engine looks up `net/int13/HalActivity`
+  itself; only the application id changed.
+
 ### Fixed
 - **Using the shield slider froze the game.** A slide-bar's last three
   arguments are `(onMove, onRelease, user)`, not `(callback, user, spare)` --

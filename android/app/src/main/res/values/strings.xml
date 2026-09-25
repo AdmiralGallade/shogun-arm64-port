@@ -1,2 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources><string name="app_name">Shogun</string></resources>
+<resources>
+    <!-- Deliberately not "Shogun": this is the 64-bit port, and it has to be
+         tellable apart from the original at a glance in the launcher. -->
+    <string name="app_name">Shogun 64</string>
+</resources>
