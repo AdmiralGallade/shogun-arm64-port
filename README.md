@@ -16,7 +16,7 @@
 > [!IMPORTANT]
 > **This repository contains the port, not the game.** No engine binary, asset
 > pack, artwork or music is distributed here. You need your own copy of the
-> APK — see [Supply the game](#2-supply-the-game).
+> APK — see [Getting the game](#getting-the-game).
 
 ---
 
@@ -118,66 +118,90 @@ Android, bada, WP8 and the Nintendo 3DS. The teardown corroborates that from
 the inside: the binary still carries `net.int13.ardefender` and a set of camera
 callbacks that must resolve at startup even though Shogun never once uses them.
 
+## Getting the game
+
+You need your own copy of `Shogun: Rise Of The Renegade`. **This project does
+not distribute it and will not link to copies of it** — int13's rights did not
+lapse when the studio went quiet, and pointing at someone else's upload is the
+same act as hosting one.
+
+Routes that are actually yours to use:
+
+| If you… | Then |
+|---|---|
+| bought it on Google Play | It stays in your library after delisting. Play Store → profile → **Library**, or [play.google.com/apps](https://play.google.com/apps) → *My apps*. |
+| still have it installed | Pull it off that device: `adb shell pm path net.int13.shogun`, then `adb pull <the path>` |
+| kept a backup | Any `.apk` you archived yourself works |
+| bought it on iOS | That build will not help; the port needs the Android ARMv7 binary |
+
+Whatever you end up with, it should be the **v1.2.4 Android APK**, around 20 MB,
+containing `lib/armeabi/libHAL.Android.so` and `res/raw/data.mp3`. `build.sh`
+checks for both and tells you if they are missing.
+
 ## Quick start
 
-### 1. Prerequisites
+One command. It checks your toolchain, builds Unicorn, extracts the engine and
+asset pack from your APK, patches the in-game changelog, rebuilds the launcher
+icon, and produces a signed APK:
+
+```bash
+./build.sh path/to/Shogun-1.2.4.apk
+```
+
+Then:
+
+```bash
+adb install -r dist/Shogun-64-1.2.4-arm64.apk
+```
+
+It installs as **Shogun 64**, alongside the original rather than over it.
+
+<details>
+<summary>What it needs installed</summary>
 
 | Requirement | Notes |
 |---|---|
-| Android SDK | build-tools 36 and platform 36 — set `ANDROID_HOME` |
+| Android SDK | build-tools 36 + platform 36 — set `ANDROID_HOME` |
+| Android NDK | found automatically inside the SDK; or set `ANDROID_NDK` |
 | JDK 17+ | set `JAVA_HOME`; Android Studio ships one at `jbr/` |
-| Android NDK | set `ANDROID_NDK` |
-| CMake 3.22+, Python 3.9+ | |
-| `pip install Pillow` | for launcher-icon generation |
+| Python 3.9+ with Pillow | `python -m pip install Pillow` |
+| CMake + Ninja | used from the SDK's own `cmake/<version>/bin` if not on `PATH` |
 
-### 2. Supply the game
+`build.sh` checks every one of these first and names exactly what is missing
+rather than failing partway through. Unicorn is built once and cached in
+`.build/`, so later runs take seconds.
 
-Put **your own copy** of the Shogun APK in the repository root as
-`Shogun-1.2.4.apk`, then:
+On Windows, run it from **Git Bash**. Two things the script handles for you
+that otherwise bite: QEMU's configure (vendored in Unicorn) wants `strings` and
+`pkg-config`, neither of which ships with Git Bash — it supplies both — and
+building all of Unicorn fails on a `create_symlink` step that needs Developer
+Mode, so it builds only the shared library it actually needs.
 
-```bash
-python tools/extract_assets.py Shogun-1.2.4.apk
-```
+</details>
 
-That unpacks the engine binary and the encrypted asset pack into the places the
-build expects, rebuilds the launcher icon as an adaptive icon, and rewrites the
-in-game "What's New" panel to credit the port. Nothing it produces is tracked
-by git.
-
-### 3. Build Unicorn for arm64-v8a
+<details>
+<summary>Doing it by hand instead</summary>
 
 ```bash
-git clone https://github.com/unicorn-engine/unicorn
-cd unicorn && mkdir build && cd build
-cmake .. -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-         -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
-         -DCMAKE_BUILD_TYPE=Release -DUNICORN_ARCH=arm
-cmake --build . -j
-cp libunicorn.so ../../android/app/src/main/jniLibs/arm64-v8a/
-```
+python tools/extract_assets.py Shogun-1.2.4.apk    # engine, pack, icon, changelog
 
-### 4. Build the runtime
+git clone https://github.com/unicorn-engine/unicorn && cd unicorn
+cmake -S . -B build -G Ninja   -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26   -DCMAKE_BUILD_TYPE=Release -DUNICORN_ARCH=arm
+cmake --build build --target unicorn -j
+cp build/libunicorn.so ../android/app/src/main/jniLibs/arm64-v8a/
 
-```bash
-cd android/app/src/main/cpp && mkdir -p build && cd build
-cmake .. -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-         -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
-         -DCMAKE_BUILD_TYPE=Release \
-         -DUNICORN_INC=/path/to/unicorn/include \
-         -DUNICORN_LIB=/path/to/unicorn/build/libunicorn.so
-cmake --build . -j
-```
+cd ../android/app/src/main/cpp
+cmake -S . -B build -G Ninja   -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26   -DCMAKE_BUILD_TYPE=Release   -DUNICORN_INC=/path/to/unicorn/include   -DUNICORN_LIB=/path/to/unicorn/build/libunicorn.so
+cmake --build build -j
 
-### 5. Package and install
-
-```bash
-./android/build-apk.sh
-adb install -r android/shogun-arm64.apk
+cd ../../../.. && ./android/build-apk.sh
 ```
 
 `build-apk.sh` runs aapt2, javac, d8, zipalign and apksigner directly — no
 Gradle. On first run it generates a debug keystore beside itself; that key is
 gitignored, and you need the same one to sign any later update.
+
+</details>
 
 ## Documentation
 
@@ -192,6 +216,7 @@ gitignored, and you need the same one to sign any later update.
 ## Repository layout
 
 ```
+build.sh                     one command: toolchain check -> signed APK
 android/app/src/main/cpp/    the runtime: loader + CPU, shims, GL, JNI, cheats
 android/app/src/main/java/   the Android shell: Activity, GL surface, audio
 android/build-apk.sh         Gradle-free packaging pipeline

@@ -97,7 +97,8 @@ def main() -> int:
                   file=sys.stderr)
             return 1
 
-    print("\nready. Next: build unicorn, then android/build-apk.sh -- see the README.")
+    print("\nready. If you ran this directly rather than through ./build.sh,"
+          " the remaining steps are in the README.")
     return 0
 
 
