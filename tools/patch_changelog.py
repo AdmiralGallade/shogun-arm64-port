@@ -24,13 +24,13 @@ LINES = [
     ("  - Left/right handed",              ""),
     ("New Gameplay Options:",              "What changed:"),
     ("  - Adjustable bottom deadzone",     "  - Runs on 64-bit Android"),
-    ("  - Togglable hitbox diplay",        "  - 32-bit ARM is emulated"),
-    ("New Audio Settings",                 "  - GLES1 to GPU"),
-    ("Score is now recorded on game over", "  - Audio + 3D restored"),
-    ("IAP restore bug fixed",              "Original game (c) 2012"),
-    ("Various minor bug fixes",            "int13 - rights reserved"),
-    ("Stay tuned, new playing modes",      "Preserved so it still runs"),
-    ("and goodies are coming! ;)",         "on hardware without ARM32"),
+    ("  - Togglable hitbox diplay",        "  - ARM32 is emulated"),
+    ("New Audio Settings",                 "  - Leaderboard on"),
+    ("Score is now recorded on game over", "  - Cheats menu added"),
+    ("IAP restore bug fixed",              "Source + build guide:"),
+    ("Various minor bug fixes",            "  see Cheats > GitHub"),
+    ("Stay tuned, new playing modes",      "Original game (c) 2012"),
+    ("and goodies are coming! ;)",         "int13, rights reserved"),
 ]
 
 

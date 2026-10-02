@@ -87,6 +87,7 @@ void RegisterAssetFd(int fd, FILE* f);
 // Difficulty control and its settings line (hardmode.cpp).
 void InstallHardMode(Runtime& rt, const std::string& files_dir);
 uint32_t CurrentShogun();
+bool TakeOpenGithub();
 
 // Leaderboard: the port does the networking, the engine renders the result
 // (leaderboard.cpp).

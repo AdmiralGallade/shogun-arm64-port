@@ -249,6 +249,12 @@ Java_net_int13_shogun_ShogunNative_nativeLeaderboardPending(JNIEnv* env, jclass)
   return s.empty() ? nullptr : env->NewStringUTF(s.c_str());
 }
 
+// True once, each time the in-game GitHub button is pressed.
+JNIEXPORT jboolean JNICALL
+Java_net_int13_shogun_ShogunNative_nativeTakeOpenGithub(JNIEnv*, jclass) {
+  return shogun::TakeOpenGithub() ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jstring JNICALL
 Java_net_int13_shogun_ShogunNative_nativeLeaderboardName(JNIEnv* env, jclass) {
   const std::string s = shogun::LeaderboardPlayerName();

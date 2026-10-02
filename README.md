@@ -80,6 +80,7 @@ Running on a Pixel 10 Pro, Android 17 — `arm64-v8a` only, PowerVR GPU.
 | | |
 |---|---|
 | Boot, asset pack, save data | ✅ |
+| Online leaderboard, on a server of your own | ✅ |
 | 2D rendering — menus, HUD, bullets | ✅ |
 | 3D rendering — hangar, level transitions | ✅ |
 | Audio — MP3 music and SFX at 22050 Hz | ✅ |
@@ -93,10 +94,13 @@ Server, but by doing the networking in the port and feeding the engine's own
 `onReceiveScore` callback. Runs on a free Cloudflare Worker; see
 [server/](server/). Off by default until you point it at an endpoint.
 
-There is also a **Cheats tab** in the game's own settings menu — Hard Mode,
+There is also a **Cheats tab** added to the game's own settings menu — Hard Mode,
 Full Capsules and a shield-strength slider — built with the engine's own widget
-constructors rather than drawn over the top of it. See
-[MODDING.md](docs/MODDING.md).
+constructors rather than drawn over the top of it, including a **Source on
+GitHub** button that opens this page. See [MODDING.md](docs/MODDING.md).
+
+The in-game *What's New* panel is rewritten in place to describe the port
+rather than the 2012 release, and to credit int13 for the original.
 
 ## The game
 

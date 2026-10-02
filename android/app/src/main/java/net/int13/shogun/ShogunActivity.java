@@ -124,6 +124,7 @@ public class ShogunActivity extends net.int13.HalActivity {
         @Override public void onDrawFrame(GL10 gl) {
             if (!started) return;
             ShogunNative.nativeTick();
+            if (ShogunNative.nativeTakeOpenGithub()) openRepoPage();
             // Pace to 60 fps. The engine was written for it, and on a 120 Hz
             // panel an unthrottled loop burns twice the CPU for no benefit --
             // CPU the software mixer needs to keep the audio track fed.
@@ -267,6 +268,30 @@ public class ShogunActivity extends net.int13.HalActivity {
         });
         try { done.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS); }
         catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+    }
+
+    /** Where the in-game "Source on GitHub" button goes. */
+    static final String REPO_URL = "https://github.com/AdmiralGallade/shogun-arm64-port";
+
+    /**
+     * The button lives inside the emulated game, so the press arrives as a flag
+     * on the GL thread. Opening a browser has to happen on the UI thread, and
+     * must not block the engine, so it is handed over rather than done there.
+     */
+    void openRepoPage() {
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                try {
+                    android.content.Intent i = new android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(REPO_URL));
+                    i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(i);
+                } catch (Exception e) {
+                    Log.w(TAG, "could not open " + REPO_URL, e);
+                }
+            }
+        });
     }
 
     /** Started once the engine is up; harmless when no endpoint is set. */

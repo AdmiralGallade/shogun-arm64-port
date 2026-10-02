@@ -67,6 +67,7 @@ constexpr uint32_t kOurTab = 2;            // the one spare tab
 constexpr uint32_t kSwHardMode = 0x6e0;
 constexpr uint32_t kSwCapsules = 0x6e1;
 constexpr uint32_t kSlShield   = 0x6e2;
+constexpr uint32_t kBtGithub   = 0x6e3;
 
 constexpr uint32_t kRankHard = 20u << 16;  // == the measured ceiling
 constexpr uint32_t kRankBase = 1u << 16;
@@ -92,6 +93,7 @@ constexpr uint32_t kCbHardMode  = kCbBase + 0x00;
 constexpr uint32_t kCbCapsules  = kCbBase + 0x04;
 constexpr uint32_t kCbShieldMv  = kCbBase + 0x08;   // onMove
 constexpr uint32_t kCbShieldRel = kCbBase + 0x0c;   // onRelease
+constexpr uint32_t kCbGithub    = kCbBase + 0x10;
 
 const char* kInitSettingsMenu = "_Z16InitSettingsMenuP6SHOGUN";
 const char* kInitSettingTabs  = "_Z15InitSettingTabsP6SHOGUN";
@@ -103,6 +105,8 @@ const char* kInitPlayerGame = "_Z14InitPlayerGameP6PLAYER";
 const char* kInitTextLine =
     "_Z20InitTextSettingsLineP12SETTINGSLINEPciiiiS1_jS1_";
 const char* kInitWorldFile = "_Z13InitWorldFileP6SHOGUNPc";
+const char* kInitButtonLine =
+    "_Z22InitButtonSettingsLineP12SETTINGSLINEPciiiijS1_PvS2_";
 
 // A partition -- the level's event timeline -- lives in the BH context.
 // BH_SavePartition(handle, name) writes UE_SaveBinFile(name, &count,
@@ -143,6 +147,7 @@ struct State {
   std::map<uint32_t, std::string> by_hash; // resolved name table
   std::vector<uint8_t> events;             // last partition dumped
   bool     want_resolve = false;
+  bool     open_github = false;   // set by the button, read by Java
 };
 State g;
 
@@ -413,6 +418,32 @@ bool AddSlider(const char* name, const char* label, uint32_t handle,
   return true;
 }
 
+// A button row. InitButtonSettingsLine is in the binary but the game never
+// uses it, so this is the engine's own widget type getting its first outing.
+bool AddButton(const char* name, const char* label, uint32_t handle,
+               uint32_t callback) {
+  const uint32_t tab = TabAt(kOurTab);
+  const uint16_t n = RdU16(tab + kTabCountAt);
+  if (n >= kLineCap) return false;
+  const uint32_t line = tab + kLinesOff + n * kLineStride;
+  const uint32_t y = kFirstRowY + n * kRowStep;
+  const uint32_t nm = GuestStr(name), lb = GuestStr(label);
+  if (!nm || !lb) return false;
+  // (line, name, x, y, w, h, handle, label, callback, user)
+  uint32_t out = 0;
+  std::string err;
+  if (!g.rt->CallSym(kInitButtonLine,
+                     {line, nm, kRowX, y, kRowW, kRowH, handle, lb, callback,
+                      g.shogun}, &out, &err)) {
+    LOGW("cheats: button '%s' failed: %s", label, err.c_str());
+    return false;
+  }
+  WrU16(tab + kTabCountAt, static_cast<uint16_t>(n + 1));
+  LOGI("cheats: button '%s' as line %u @0x%08x y=%u widget=%u", label, n, line,
+       y, RdU32(line + kLineWidget));
+  return true;
+}
+
 // An empty row at the end. The OK button is pinned to the settings box's
 // bottom-right corner, so whatever control sits on the last row gets covered
 // by it -- that is what put OK on top of the Hard Mode switch in Options, and
@@ -448,6 +479,7 @@ void BuildLines() {
   AddSwitch("MaxCapsules", "Full Capsules", kSwCapsules, kCbCapsules, g.caps);
   AddSlider("ShieldStrength", "Shield", kSlShield, kCbShieldMv, kCbShieldRel,
             ShieldToSlider(g.shield_mult));
+  AddButton("GitHub", "Source on GitHub", kBtGithub, kCbGithub);
   AddSpacer();
 }
 
@@ -523,6 +555,11 @@ void InstallHardMode(Runtime& rt, const std::string& files_dir) {
       case kCbCapsules: SetFullCapsules(state != 0); break;
       case kCbShieldMv:  SetShieldFromSlider(state); break;
       case kCbShieldRel: break;   // must be a real function, but does nothing
+      case kCbGithub:
+        // Opening a browser is Java's job; just raise the flag.
+        g.open_github = true;
+        LOGI("cheats: GitHub button pressed");
+        break;
       default: LOGW("cheats: callback at unmapped 0x%08x", addr); break;
     }
     r.Ret(0);
@@ -641,6 +678,13 @@ void HardModeTick(uint64_t ticks) {
 }
 
 bool HardModeEnabled() { return g.hard; }
+
+// Polled by Java, which owns the Intent that opens a browser.
+bool TakeOpenGithub() {
+  if (!g.open_github) return false;
+  g.open_github = false;
+  return true;
+}
 
 // The leaderboard needs the same pointer this module already learns from its
 // InitSettingsMenu watch; there is no reason to watch for it twice.

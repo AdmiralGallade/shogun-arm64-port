@@ -68,6 +68,17 @@ What made it possible, all of it data rather than code:
   engine never hands out -- and `Runtime::SymAddr` resolves any of the 8,777
   symbols by name.
 
+### Added (in game)
+- **A "Source on GitHub" button** in the Cheats tab, which opens this
+  repository. It uses `InitButtonSettingsLine` -- a widget type that is in the
+  binary but which the game itself never uses, so this is its first outing.
+  The press arrives as a flag on the GL thread; the browser Intent is handed to
+  the UI thread so it cannot block the engine.
+- The in-game *What's New* panel now describes the port rather than the 2012
+  release, and points at the Cheats tab for the source. Three of its thirteen
+  slots are shorter than the text that first went in them, which the patcher's
+  per-slot length check caught before anything was written.
+
 ### Added (online)
 - **The leaderboard works again.** The game reached int13's "Hub Server" at a
   hardcoded IP over NWT, their obfuscated binary packet protocol, and asked it
