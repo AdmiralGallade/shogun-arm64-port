@@ -78,6 +78,8 @@ class JniBridge {
 // Forwards the guest's GLES 1.x calls to the device driver (gl.cpp).
 void InstallGl(Runtime& rt);
 uint64_t GlDrawCount();
+std::string GlProfile();
+uint64_t GlNsTotal();
 std::string GlDiagnostics(Runtime& rt);
 // Rebuild every GL object after Android destroyed the EGL context.
 void GlContextLost();

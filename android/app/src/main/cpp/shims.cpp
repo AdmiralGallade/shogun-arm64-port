@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -28,6 +29,10 @@ namespace shogun {
 namespace {
 
 constexpr const char* kTag = "shogun";
+
+// Bumped by the clock_gettime shim. Read from the tick on another thread, but
+// only ever to print it, so a relaxed counter is enough.
+std::atomic<uint64_t> g_clock_queries{0};
 
 struct FileState {
   std::string root;                                  // app-private storage
@@ -161,6 +166,7 @@ void InstallShims(Runtime& rt, const std::string& files_dir) {
 
   // --------------------------------------------------------------- time
   S("clock_gettime", [](Runtime& r) {
+    g_clock_queries++;
     struct timespec ts{};
     clock_gettime(CLOCK_MONOTONIC, &ts);
     uint32_t v[2] = {static_cast<uint32_t>(ts.tv_sec),
@@ -331,5 +337,7 @@ void InstallShims(Runtime& rt, const std::string& files_dir) {
 void RegisterAssetFd(int fd, FILE* f) {
   if (g_files) g_files->fds[fd] = f;
 }
+
+uint64_t ClockQueryCount() { return g_clock_queries.load(std::memory_order_relaxed); }
 
 }  // namespace shogun

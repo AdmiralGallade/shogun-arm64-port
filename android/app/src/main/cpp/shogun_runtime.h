@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <condition_variable>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -76,7 +77,8 @@ class Runtime {
   // ---- registration ------------------------------------------------------
   void SetShim(const std::string& import_name, ShimFn fn);
   ShimFn ShimFor(const std::string& import_name) const;
-  void AddTrapRegion(uint32_t base, uint32_t size, TrapFn fn, bool already_mapped);
+  void AddTrapRegion(uint32_t base, uint32_t size, TrapFn fn,
+                     bool already_mapped, bool stubbed = false);
 
   // Observe a guest function without disturbing it: the callback runs at
   // `addr` with the guest's registers intact and execution continues normally.
@@ -100,6 +102,29 @@ class Runtime {
   uint32_t ExidxCount() const { return exidx_count_; }
   uint32_t ErrnoAddr() const { return errno_addr_; }
   std::string Where();             // symbolicated PC, for crash reports
+
+  // Guest entry is serialised on one mutex (see mu_ below), so the GL thread
+  // and the AudioTrack thread can never both be inside the emulator. These
+  // two split waiting for that lock from actually emulating, which is the only
+  // way to tell a contention problem from a raw speed one -- a tick timed from
+  // the outside charges one thread for the other thread's work.
+  uint64_t LockWaitNs() const {
+    return lock_wait_ns_.load(std::memory_order_relaxed);
+  }
+  uint64_t ExecNs() const {
+    return exec_ns_.load(std::memory_order_relaxed);
+  }
+  // Emulation time charged to the calling thread only. The render thread and
+  // the audio thread take turns inside one emulator, so this is what says
+  // which of them is spending the budget.
+  static uint64_t ExecNsThisThread();
+
+  // Import calls take one of two paths out of the guest. The fast one rewrites
+  // PC and keeps emulating; the slow one has to stop the emulator and restart
+  // it, which throws away far more than it looks like. These count both so the
+  // ratio is visible rather than assumed.
+  uint64_t TrapsFast() const { return traps_fast_.load(std::memory_order_relaxed); }
+  uint64_t TrapsSlow() const { return traps_slow_.load(std::memory_order_relaxed); }
   const std::unordered_map<std::string, uint64_t>& CallCounts() const {
     return call_counts_;
   }
@@ -139,7 +164,7 @@ class Runtime {
   std::unordered_map<std::string, uint64_t> call_counts_;
   std::vector<std::string> unimplemented_;
 
-  struct TrapRegion { uint32_t lo, hi; TrapFn fn; };
+  struct TrapRegion { uint32_t lo, hi; TrapFn fn; bool stubbed; };
   std::vector<TrapRegion> trap_regions_;
   std::unordered_map<uint32_t, ShimFn> watches_;
 
@@ -155,7 +180,39 @@ class Runtime {
   // and the AudioTrack thread (onAudioFrame). The library has no locks of its
   // own -- on 2012 hardware it got away with racing -- so we serialise entry
   // and give each thread its own guest stack rather than reproduce that luck.
-  std::mutex mu_;
+  // Guest entry is serialised, and it must be serialised *fairly*.
+  //
+  // A plain std::mutex is not FIFO, and the two threads contending for it are
+  // not equals: the AudioTrack thread runs at URGENT_AUDIO priority and loops
+  // tightly, so it re-took the lock ahead of the waiting render thread over
+  // and over. Measured effect: render frames that wanted 16 ms of emulation
+  // spent up to 98 ms queueing, which is the jolt you feel every few seconds.
+  //
+  // A ticket lock bounds it. The render thread now waits at most one audio
+  // chunk (about 6 ms) and the audio thread at most one tick, instead of
+  // either being able to starve. Acquisitions are only a few per frame, so
+  // the condition variable costs nothing worth measuring.
+  class FairMutex {
+   public:
+    void lock() {
+      std::unique_lock<std::mutex> lk(m_);
+      const uint64_t me = next_++;
+      cv_.wait(lk, [this, me] { return serving_ == me; });
+    }
+    void unlock() {
+      std::lock_guard<std::mutex> lk(m_);
+      serving_++;
+      cv_.notify_all();
+    }
+
+   private:
+    std::mutex m_;
+    std::condition_variable cv_;
+    uint64_t next_ = 0, serving_ = 0;
+  };
+  FairMutex mu_;
+  std::atomic<uint64_t> lock_wait_ns_{0}, exec_ns_{0};
+  std::atomic<uint64_t> traps_fast_{0}, traps_slow_{0};
   uint32_t StackForThisThread();
 
   bool     pending_ = false;
@@ -166,5 +223,11 @@ class Runtime {
 
 // Installs the 99 libc/OS shims (shims.cpp).
 void InstallShims(Runtime& rt, const std::string& files_dir);
+
+// How many times the guest has asked what time it is. The engine's own
+// update step is written against a wall clock, so this number rising with
+// the tick count is what tells you game speed follows real time rather
+// than the frame rate -- the difference between a stutter and a slowdown.
+uint64_t ClockQueryCount();
 
 }  // namespace shogun

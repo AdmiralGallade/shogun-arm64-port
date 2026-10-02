@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <ctime>
 #include <cstring>
 
 namespace shogun {
@@ -173,13 +174,24 @@ void Runtime::SetupImportTraps() {
 
   AddTrapRegion(kTrapBase, kTrapSize,
                 [](Runtime& rt, uint32_t addr) { rt.ServiceImport(addr); },
-                /*already_mapped=*/true);
+                /*already_mapped=*/true, /*stubbed=*/true);
 }
 
 void Runtime::AddTrapRegion(uint32_t base, uint32_t size, TrapFn fn,
-                            bool already_mapped) {
+                            bool already_mapped, bool stubbed) {
   if (!already_mapped) uc_mem_map(uc_, base, size, UC_PROT_ALL);
-  trap_regions_.push_back({base, base + size, std::move(fn)});
+  if (stubbed) {
+    // Fill the region with ARM "BX LR". The hook below services the import and
+    // then simply lets this execute, which returns to the caller in whichever
+    // instruction set it came from -- bit 0 of LR decides, exactly as ARM
+    // interworking intends. That is what makes the cheap path possible: no
+    // stopping the emulator, no writing PC from inside a code hook (which
+    // Unicorn does not honour anyway -- the translated block carries on).
+    const uint32_t bx_lr = 0xE12FFF1Eu;
+    for (uint32_t a = base; a + 4 <= base + size; a += 4)
+      uc_mem_write(uc_, a, &bx_lr, 4);
+  }
+  trap_regions_.push_back({base, base + size, std::move(fn), stubbed});
   uc_hook h;
   uc_hook_add(uc_, &h, UC_HOOK_CODE, (void*)&Runtime::HookTrap, this,
               base, base + size - 1);
@@ -258,18 +270,18 @@ void Runtime::HookWatch(uc_engine*, uint64_t addr, uint32_t, void* user) {
 
 void Runtime::HookTrap(uc_engine* uc, uint64_t addr, uint32_t, void* user) {
   auto* rt = static_cast<Runtime*>(user);
-  uint32_t lr = 0, cpsr = 0;
-  uc_reg_read(uc, UC_ARM_REG_LR, &lr);
-  uc_reg_read(uc, UC_ARM_REG_CPSR, &cpsr);
-  const bool cur_thumb = (cpsr >> 5) & 1;
-  if (((lr & 1u) != 0) == cur_thumb) {
-    // Fast path: caller returns to the instruction set we are already in.
-    for (auto& r : rt->trap_regions_)
-      if (addr >= r.lo && addr < r.hi) { r.fn(*rt, static_cast<uint32_t>(addr)); break; }
-    uint32_t pc = lr & ~1u;
-    uc_reg_write(uc, UC_ARM_REG_PC, &pc);
+  // A stubbed region ends in BX LR, so servicing the call and returning is
+  // enough: emulation runs straight on through the return. Everything else
+  // still has to stop and be restarted by CallAddr, which costs far more --
+  // measured at 100% of import calls before the stubs existed.
+  for (auto& r : rt->trap_regions_) {
+    if (addr < r.lo || addr >= r.hi) continue;
+    if (!r.stubbed) break;
+    rt->traps_fast_++;
+    r.fn(*rt, static_cast<uint32_t>(addr));
     return;
   }
+  rt->traps_slow_++;
   rt->pending_ = true;
   rt->pending_addr_ = static_cast<uint32_t>(addr);
   uc_emu_stop(uc);
@@ -404,6 +416,19 @@ uint32_t Runtime::StackForThisThread() {
 // two threads entering the guest still serialises on the lock as before.
 thread_local int t_guest_depth = 0;
 
+// Emulation nanoseconds charged to this thread. Not atomic on purpose: only
+// the owning thread ever touches it.
+thread_local uint64_t t_exec_ns = 0;
+
+uint64_t Runtime::ExecNsThisThread() { return t_exec_ns; }
+
+static uint64_t MonoNs() {
+  struct timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ull +
+         static_cast<uint64_t>(ts.tv_nsec);
+}
+
 bool Runtime::CallAddr(uint32_t addr, bool thumb, const std::vector<uint32_t>& args,
                        uint32_t* out_r0, std::string* err) {
   if (t_guest_depth > 0) {
@@ -412,7 +437,22 @@ bool Runtime::CallAddr(uint32_t addr, bool thumb, const std::vector<uint32_t>& a
   }
   struct Depth { Depth() { t_guest_depth++; } ~Depth() { t_guest_depth--; } } depth;
 
-  std::lock_guard<std::mutex> lock(mu_);
+  const uint64_t waited_from = MonoNs();
+  std::lock_guard<FairMutex> lock(mu_);
+  // Charge the wait to whoever was queueing and the rest to emulation, so the
+  // two can be read apart afterwards.
+  struct ExecTimer {
+    std::atomic<uint64_t>& sink;
+    uint64_t t0;
+    explicit ExecTimer(std::atomic<uint64_t>& s) : sink(s), t0(MonoNs()) {}
+    ~ExecTimer() {
+      const uint64_t d = MonoNs() - t0;
+      sink += d;
+      t_exec_ns += d;
+    }
+  } exec_timer(exec_ns_);
+  lock_wait_ns_ += exec_timer.t0 - waited_from;
+
   uint32_t sp = StackForThisThread();
   if (args.size() > 4) {
     size_t extra = args.size() - 4;

@@ -18,6 +18,8 @@
 #include <android/log.h>
 
 #include <algorithm>
+#include <ctime>
+#include <string>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
@@ -77,6 +79,15 @@ struct GlState {
   std::unordered_map<uint32_t, std::unordered_map<uint32_t, int32_t>> texparam;
   std::unordered_map<uint32_t, uint32_t> buftarget;   // buffer name -> target
   std::unordered_map<uint32_t, bool> srv_enabled;     // glEnable/glDisable caps
+  bool depth_mask = true;      // mirrors glDepthMask; a clear needs it enabled
+  GLbitfield clear_asked = 0;  // last mask the engine asked for, for the log
+  // Host-side cost of each GL entry point. The emulation timer counts a shim
+  // as guest time, because a shim runs inside the emulator's own run window --
+  // so driver time has been hiding inside "emulating" all along. This is what
+  // separates them.
+  uint64_t total_ns = 0;       // never reset; for per-frame deltas
+  struct Prof { uint64_t ns = 0, calls = 0; };
+  std::unordered_map<std::string, Prof> prof;
   uint32_t bound_tex = 0;
   size_t shadow_bytes = 0;
   uint64_t context_losses = 0;
@@ -223,12 +234,49 @@ void UploadArrays(Runtime& rt, uint32_t vertex_count) {
 
 }  // namespace
 
+static uint64_t GlNowNs() {
+  struct timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ull +
+         static_cast<uint64_t>(ts.tv_nsec);
+}
+
 void InstallGl(Runtime& rt) {
-  auto S = [&rt](const char* n, ShimFn f) { rt.SetShim(n, std::move(f)); };
+  // Every GL entry point goes through here, so time them all in one place.
+  auto S = [&rt](const char* n, ShimFn f) {
+    std::string name(n);
+    rt.SetShim(n, [name, f](Runtime& r) {
+      const uint64_t t0 = GlNowNs();
+      f(r);
+      const uint64_t d = GlNowNs() - t0;
+      auto& st = g.prof[name];
+      st.ns += d;
+      st.calls++;
+      g.total_ns += d;
+    });
+  };
   auto F = [](Runtime& r, int i) { return AsFloat(r.Arg(i)); };
 
   // ---- plain state -------------------------------------------------------
-  S("glClear",        [](Runtime& r) { glClear(r.Arg(0)); r.Ret(0); });
+  // Measured: this is the most expensive entry point in the whole GL layer, at
+  // about 2.7 ms a frame -- but it is not work. glClear is the first call of
+  // each frame, and EGL parks the thread here waiting for a free back buffer,
+  // so the time is the vsync wait that eglSwapBuffers appears not to take. Do
+  // not try to optimise it. (The engine already clears colour and depth
+  // together, 0x4100, so there is no tile-load problem to fix either.)
+  S("glClear",        [](Runtime& r) {
+    const GLbitfield asked = r.Arg(0);
+    if (asked != g.clear_asked) {
+      g.clear_asked = asked;
+      __android_log_print(ANDROID_LOG_INFO, "shogun",
+          "glClear mask from engine: 0x%04x (color=%d depth=%d stencil=%d)",
+          asked, (asked & GL_COLOR_BUFFER_BIT) != 0,
+          (asked & GL_DEPTH_BUFFER_BIT) != 0,
+          (asked & GL_STENCIL_BUFFER_BIT) != 0);
+    }
+    glClear(asked);
+    r.Ret(0);
+  });
   // glClearColor takes GLfloat, not GLfixed. Feeding the raw soft-float bit
   // patterns to glClearColorx treats them as 16.16 fixed point, which clamps
   // to 1.0 and clears the screen white on every frame.
@@ -239,7 +287,9 @@ void InstallGl(Runtime& rt) {
   S("glDisable",      [](Runtime& r) {
     g.srv_enabled[r.Arg(0)] = false; glDisable(r.Arg(0)); r.Ret(0); });
   S("glBlendFunc",    [](Runtime& r) { glBlendFunc(r.Arg(0), r.Arg(1)); r.Ret(0); });
-  S("glDepthMask",    [](Runtime& r) { glDepthMask(r.Arg(0) ? GL_TRUE : GL_FALSE); r.Ret(0); });
+  S("glDepthMask",    [](Runtime& r) {
+    g.depth_mask = r.Arg(0) != 0;
+    glDepthMask(g.depth_mask ? GL_TRUE : GL_FALSE); r.Ret(0); });
   S("glFrontFace",    [](Runtime& r) { glFrontFace(r.Arg(0)); r.Ret(0); });
   S("glPixelStorei",  [](Runtime& r) { glPixelStorei(r.Arg(0), r.Arg(1)); r.Ret(0); });
   S("glFinish",       [](Runtime& r) { glFinish(); r.Ret(0); });
@@ -529,6 +579,26 @@ void InstallGl(Runtime& rt) {
       }
     });
   }
+}
+
+uint64_t GlNsTotal() { return g.total_ns; }
+
+// Top GL entry points by host time since the last call, then reset.
+std::string GlProfile() {
+  std::vector<std::pair<uint64_t, std::string>> top;
+  uint64_t total = 0;
+  for (const auto& kv : g.prof) {
+    total += kv.second.ns;
+    top.emplace_back(kv.second.ns, kv.first + " x" +
+                     std::to_string(kv.second.calls));
+  }
+  std::sort(top.rbegin(), top.rend());
+  std::string out = std::to_string(total / 1000000) + " ms total:";
+  for (size_t i = 0; i < top.size() && i < 5; i++)
+    out += "  " + top[i].second + " " +
+           std::to_string(top[i].first / 1000000) + "ms";
+  g.prof.clear();
+  return out;
 }
 
 uint64_t GlDrawCount() { return g.draws; }
