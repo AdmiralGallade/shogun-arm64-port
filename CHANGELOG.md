@@ -69,6 +69,14 @@ What made it possible, all of it data rather than code:
   symbols by name.
 
 ### Added (in game)
+- **The port credit now sits above int13's on the credits screen** (the
+  triangle stack -> Credits). The credits are 13 two-column lines built by
+  `Loader`, the first of which is `(c) Copyright int13 2011-2012.`, and
+  `MENU_AddCreditLine` only appends -- so the lines are captured as the game
+  adds them, then the list is reset and replayed after the port's two. Replaying
+  the captured arguments rather than hardcoding the text means the pointers and
+  colours are exactly the ones the game used, so the original team's credits
+  cannot be mangled.
 - **A "Source on GitHub" button** in the Cheats tab, which opens this
   repository. It uses `InitButtonSettingsLine` -- a widget type that is in the
   binary but which the game itself never uses, so this is its first outing.

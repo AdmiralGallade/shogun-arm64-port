@@ -28,6 +28,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <array>
 #include <map>
 #include <string>
 #include <vector>
@@ -105,6 +106,16 @@ const char* kInitPlayerGame = "_Z14InitPlayerGameP6PLAYER";
 const char* kInitTextLine =
     "_Z20InitTextSettingsLineP12SETTINGSLINEPciiiiS1_jS1_";
 const char* kInitWorldFile = "_Z13InitWorldFileP6SHOGUNPc";
+// The credits are 13 two-column lines, built by Loader. The first is
+// "(c) Copyright int13 2011-2012.", and MENU_AddCreditLine only appends -- so
+// putting the port credit above int13's means capturing the real lines as they
+// are added, then resetting and replaying them after ours. Capturing beats
+// hardcoding: the arguments replayed are exactly the ones the game passed,
+// pointers and colours included, so the team's credits cannot be mangled.
+const char* kAddCreditLine  = "_Z18MENU_AddCreditLinejPcjS_j";
+const char* kResetCredits   = "_Z17MENU_ResetCreditsj";
+constexpr size_t kMaxCredits = 64;
+
 const char* kInitButtonLine =
     "_Z22InitButtonSettingsLineP12SETTINGSLINEPciiiijS1_PvS2_";
 
@@ -148,6 +159,12 @@ struct State {
   std::vector<uint8_t> events;             // last partition dumped
   bool     want_resolve = false;
   bool     open_github = false;   // set by the button, read by Java
+  // captured MENU_AddCreditLine arguments, in the order the game added them
+  std::vector<std::array<uint32_t, 5>> credits;
+  uint32_t credit_handle = 0;
+  size_t   credits_seen = 0;
+  uint64_t credits_last_tick = 0;
+  bool     credits_done = false;
 };
 State g;
 
@@ -282,6 +299,41 @@ void DumpPartition() {
     }
   }
   LOGI("partition: dump complete (%u events)", count);
+}
+
+// Put the port credit above int13's by rebuilding the list: reset it, add ours,
+// then replay every line the game added, with the arguments it actually used.
+void InjectCredits() {
+  if (g.credits_done || g.credits.size() < 4 || !g.credit_handle) return;
+  // Wait until the game has stopped adding lines before touching the list.
+  if (g.credits.size() != g.credits_seen) {
+    g.credits_seen = g.credits.size();
+    return;
+  }
+  g.credits_done = true;
+
+  // Match the game's own colours rather than inventing any.
+  const uint32_t col_l = g.credits[0][2], col_r = g.credits[0][4];
+  const uint32_t h = g.credit_handle;
+
+  const uint32_t a1 = GuestStr("64-bit arm64 port");
+  const uint32_t b1 = GuestStr("AdmiralGallade");
+  const uint32_t a2 = GuestStr("Source and build guide");
+  const uint32_t b2 = GuestStr("github.com/AdmiralGallade/shogun-arm64-port");
+  if (!a1 || !b1 || !a2 || !b2) { LOGW("credits: out of guest memory"); return; }
+
+  uint32_t out = 0;
+  std::string err;
+  if (!g.rt->CallSym(kResetCredits, {h}, &out, &err)) {
+    LOGW("credits: reset failed: %s", err.c_str());
+    return;
+  }
+  CallQuiet(kAddCreditLine, {h, a1, col_l, b1, col_r}, &out);
+  CallQuiet(kAddCreditLine, {h, a2, col_l, b2, col_r}, &out);
+  for (const auto& c : g.credits)
+    CallQuiet(kAddCreditLine, {c[0], c[1], c[2], c[3], c[4]}, &out);
+  LOGI("credits: port credit placed above int13's, %zu original lines replayed",
+       g.credits.size());
 }
 
 // ---- building the tab ----------------------------------------------------
@@ -603,6 +655,16 @@ void InstallHardMode(Runtime& rt, const std::string& files_dir) {
     LOGI("cheats: watching %s @0x%08x", sym, at);
   }
 
+  const uint32_t cl = rt.SymAddr(kAddCreditLine);
+  if (cl) {
+    rt.AddWatch(cl, [](Runtime& r) {
+      if (g.credits.size() >= kMaxCredits) return;
+      g.credit_handle = r.Arg(0);
+      g.credits.push_back({r.Arg(0), r.Arg(1), r.Arg(2), r.Arg(3), r.Arg(4)});
+    });
+    LOGI("cheats: watching %s @0x%08x", kAddCreditLine, cl);
+  }
+
   const uint32_t pg = rt.SymAddr(kInitPlayerGame);
   if (pg) {
     rt.AddWatch(pg, [](Runtime& r) {
@@ -618,7 +680,7 @@ void InstallHardMode(Runtime& rt, const std::string& files_dir) {
 void HardModeTick(uint64_t ticks) {
   if (!g.rt || !g.shogun) return;
   if (ticks == 240) DumpOnce();
-  if ((ticks % 60) == 0) BuildLines();
+  if ((ticks % 60) == 0) { BuildLines(); InjectCredits(); }
 
   // The partition is loaded during InitWorldFile, so dump a little after it.
   if (g.want_dump && !g.dumped_part && (ticks % 30) == 0) {
