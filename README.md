@@ -75,7 +75,9 @@ Four pieces do the work:
 
 ## Status
 
-Running on a Pixel 10 Pro, Android 17 — `arm64-v8a` only, PowerVR GPU.
+Running on a Pixel 10 Pro (PowerVR) and a Pixel 7 (Mali), both Android 17 and
+both `arm64-v8a` only — two different GPU vendors, and the original APK is
+refused on each with `INSTALL_FAILED_NO_MATCHING_ABIS`.
 
 | | |
 |---|---|
@@ -86,6 +88,7 @@ Running on a Pixel 10 Pro, Android 17 — `arm64-v8a` only, PowerVR GPU.
 | Audio — MP3 music and SFX at 22050 Hz | ✅ |
 | Touch input, pause/resume, saved progress | ✅ |
 | **Frame cost** | **5.8–12.9 ms** against a 16.7 ms budget |
+| Steady frame rate | **58–60 fps** measured on the Pixel 7, panel pinned to 60 Hz |
 | Audio callback | ~3 ms per 512-sample buffer |
 | Emulated throughput | ~1650–2000 MIPS, against the ~600 MIPS it was written for |
 
