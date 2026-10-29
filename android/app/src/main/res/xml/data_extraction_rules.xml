@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 and newer: the same saves, to the cloud and to a new phone. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="settings.sav" />
+        <include domain="file" path="gamesettings.sav" />
+        <include domain="file" path="deadzonesettings.sav" />
+        <include domain="file" path="s.sav" />
+        <include domain="file" path="record.bin" />
+        <include domain="file" path="cheats.cfg" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="settings.sav" />
+        <include domain="file" path="gamesettings.sav" />
+        <include domain="file" path="deadzonesettings.sav" />
+        <include domain="file" path="s.sav" />
+        <include domain="file" path="record.bin" />
+        <include domain="file" path="cheats.cfg" />
+    </device-transfer>
+</data-extraction-rules>

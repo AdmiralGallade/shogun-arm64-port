@@ -130,6 +130,14 @@ void Apply(const Result& r) {
 
 void InstallLeaderboard(Runtime& rt) {
   g.rt = &rt;
+  {
+    // A relaunch reuses the process (see hardmode.cpp ResetState): nothing
+    // queued for the previous engine belongs to this one.
+    std::lock_guard<std::mutex> lk(g.mu);
+    g.have_pending = false;
+    g.inbox.clear();
+    g.lb_handle = 0;
+  }
   const uint32_t at = rt.SymAddr(kSubmitScore);
   if (!at) { LOGW("leaderboard: %s not found", kSubmitScore); return; }
   // r0 = leaderboard handle, r1 = board name, r2 = score.

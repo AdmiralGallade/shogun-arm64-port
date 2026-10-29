@@ -17,6 +17,7 @@ add_library(shogun SHARED
     jni_bridge.cpp
     gl.cpp
     hardmode.cpp
+    missile.cpp
     leaderboard.cpp)
 
 target_include_directories(shogun PRIVATE "${UNICORN_INC}")

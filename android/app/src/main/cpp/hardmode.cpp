@@ -69,6 +69,7 @@ constexpr uint32_t kSwHardMode = 0x6e0;
 constexpr uint32_t kSwCapsules = 0x6e1;
 constexpr uint32_t kSlShield   = 0x6e2;
 constexpr uint32_t kBtGithub   = 0x6e3;
+constexpr uint32_t kBtBugReport = 0x6e4;
 
 constexpr uint32_t kRankHard = 20u << 16;  // == the measured ceiling
 constexpr uint32_t kRankBase = 1u << 16;
@@ -95,6 +96,7 @@ constexpr uint32_t kCbCapsules  = kCbBase + 0x04;
 constexpr uint32_t kCbShieldMv  = kCbBase + 0x08;   // onMove
 constexpr uint32_t kCbShieldRel = kCbBase + 0x0c;   // onRelease
 constexpr uint32_t kCbGithub    = kCbBase + 0x10;
+constexpr uint32_t kCbBugReport = kCbBase + 0x14;
 
 const char* kInitSettingsMenu = "_Z16InitSettingsMenuP6SHOGUN";
 const char* kInitSettingTabs  = "_Z15InitSettingTabsP6SHOGUN";
@@ -151,6 +153,7 @@ struct State {
   int32_t  shield_prev = -1;
   uint32_t shield_line = 0;    // so its label can show the current value
   std::string save_path;
+  std::string flag_path;          // hard_mode.bin: what the game's new game reads
   std::string world;           // level name, from the InitWorldFile watch
   bool     want_dump = false;
   bool     dumped_part = false;
@@ -159,6 +162,7 @@ struct State {
   std::vector<uint8_t> events;             // last partition dumped
   bool     want_resolve = false;
   bool     open_github = false;   // set by the button, read by Java
+  bool     open_bugreport = false;  // likewise
   // captured MENU_AddCreditLine arguments, in the order the game added them
   std::vector<std::array<uint32_t, 5>> credits;
   uint32_t credit_handle = 0;
@@ -531,7 +535,8 @@ void BuildLines() {
   AddSwitch("MaxCapsules", "Full Capsules", kSwCapsules, kCbCapsules, g.caps);
   AddSlider("ShieldStrength", "Shield", kSlShield, kCbShieldMv, kCbShieldRel,
             ShieldToSlider(g.shield_mult));
-  AddButton("GitHub", "Source on GitHub", kBtGithub, kCbGithub);
+  AddButton("GitHub", "About and source", kBtGithub, kCbGithub);
+  AddButton("BugReport", "Report a bug", kBtBugReport, kCbBugReport);
   AddSpacer();
 }
 
@@ -541,7 +546,9 @@ void LoadPref() {
   if (!f) return;
   int hard = 0, caps = 0;
   double mult = 1.0;
-  if (std::fscanf(f, "%d %d %lf", &hard, &caps, &mult) == 3) {
+  // A fourth field (the retired Beach switch) may follow; it is ignored.
+  const int n = std::fscanf(f, "%d %d %lf", &hard, &caps, &mult);
+  if (n >= 3) {
     g.hard = hard != 0;
     g.caps = caps != 0;
     if (mult >= 0.2 && mult <= 5.0) g.shield_mult = mult;
@@ -551,7 +558,19 @@ void LoadPref() {
        g.shield_mult);
 }
 
+// The game's side of the switch (missile/worlds.c HardWanted, docs/HARD_MODE.md):
+// "*hard_mode.bin", four bytes, 1 on / 0 off, read as each new game starts --
+// on, the mission runs on the hell lap with its hard waves and bosses.
+void WriteHardFlag() {
+  FILE* f = std::fopen(g.flag_path.c_str(), "wb");
+  if (!f) { LOGW("cheats: could not write %s", g.flag_path.c_str()); return; }
+  const int32_t v = g.hard ? 1 : 0;
+  std::fwrite(&v, 4, 1, f);
+  std::fclose(f);
+}
+
 void SavePref() {
+  WriteHardFlag();
   FILE* f = std::fopen(g.save_path.c_str(), "wb");
   if (!f) return;
   std::fprintf(f, "%d %d %.3f\n", g.hard ? 1 : 0, g.caps ? 1 : 0,
@@ -592,10 +611,40 @@ void SetHardMode(bool on) {
   if (!on) g.want_restore = true;
 }
 
+// The exit button only finishes the activity: the process -- and this static
+// state -- lives on, and the next launch boots a fresh engine through
+// nativeInit. Left as it was, the old SHOGUN pointer stopped the watch from
+// learning the new one and tab_made stopped the tab being added, so the
+// Cheats tab vanished. Every launch starts from nothing.
+static void ResetState() {
+  g.rt = nullptr;
+  g.shogun = 0;
+  g.dumped = g.tab_made = g.giveup = g.want_restore = false;
+  g.player = 0;
+  g.player_fresh = false;
+  g.shield_prev = -1;
+  g.shield_line = 0;
+  g.world.clear();
+  g.want_dump = g.dumped_part = g.want_resolve = false;
+  g.new_names.clear();
+  g.by_hash.clear();
+  g.events.clear();
+  g.open_github = false;
+  g.open_bugreport = false;
+  g.credits.clear();
+  g.credit_handle = 0;
+  g.credits_seen = 0;
+  g.credits_last_tick = 0;
+  g.credits_done = false;
+}
+
 void InstallHardMode(Runtime& rt, const std::string& files_dir) {
+  ResetState();
   g.rt = &rt;
   g.save_path = files_dir + "/cheats.cfg";
+  g.flag_path = files_dir + "/hard_mode.bin";
   LoadPref();
+  WriteHardFlag();                // (replaces any the old level-select button left)
 
   // Guest-callable addresses for the switches. Same mechanism as the 99
   // imports: the engine sees a function pointer, calling it lands in host code
@@ -611,6 +660,11 @@ void InstallHardMode(Runtime& rt, const std::string& files_dir) {
         // Opening a browser is Java's job; just raise the flag.
         g.open_github = true;
         LOGI("cheats: GitHub button pressed");
+        break;
+      case kCbBugReport:
+        // The email app is Java's too.
+        g.open_bugreport = true;
+        LOGI("cheats: bug report button pressed");
         break;
       default: LOGW("cheats: callback at unmapped 0x%08x", addr); break;
     }
@@ -747,6 +801,15 @@ bool TakeOpenGithub() {
   g.open_github = false;
   return true;
 }
+
+bool TakeOpenBugReport() {
+  if (!g.open_bugreport) return false;
+  g.open_bugreport = false;
+  return true;
+}
+
+// The level last set up, for the bug report; empty before the first one.
+std::string CurrentWorld() { return g.world; }
 
 // The leaderboard needs the same pointer this module already learns from its
 // InitSettingsMenu watch; there is no reason to watch for it twice.

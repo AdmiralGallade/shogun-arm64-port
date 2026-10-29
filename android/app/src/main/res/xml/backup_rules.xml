@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older. Only the saves: the engine's pack and the worlds are
+     re-extracted from the APK, and backing them up would blow the 25 MB quota. -->
+<full-backup-content>
+    <include domain="file" path="settings.sav" />
+    <include domain="file" path="gamesettings.sav" />
+    <include domain="file" path="deadzonesettings.sav" />
+    <include domain="file" path="s.sav" />
+    <include domain="file" path="record.bin" />
+    <include domain="file" path="cheats.cfg" />
+</full-backup-content>

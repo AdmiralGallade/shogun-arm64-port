@@ -226,7 +226,9 @@ gitignored, and you need the same one to sign any later update.
 build.sh                     one command: toolchain check -> signed APK
 android/app/src/main/cpp/    the runtime: loader + CPU, shims, GL, JNI, cheats
 android/app/src/main/java/   the Android shell: Activity, GL surface, audio
-android/build-apk.sh         Gradle-free packaging pipeline
+android/build-apk.sh         Gradle-free packaging pipeline (APK, or --aab for Play)
+missile/                     guest code for the new weapons, missions and bosses
+docs/privacy.html            the app's privacy policy
 runtime/                     the desktop harness the design was proven on
 apk-patch/                   repack and re-sign the original 32-bit APK
 bench/                       trap-cost benchmark: the number that decides 60 fps
@@ -236,7 +238,9 @@ device-test.py               everything about a device adb alone can establish
 
 ## Legal
 
-The porting code is MIT licensed. The game is not mine and is not included —
+The porting code is MIT licensed. The app links Unicorn, which is GPL-2.0, so
+the built app as a whole is distributed under GPL-2.0; MIT is compatible with it.
+The app's [privacy policy](docs/privacy.html) is in this repository. The game is not mine and is not included —
 see [LICENSE](LICENSE) and [CREDITS.md](CREDITS.md).
 
 This exists to keep a purchased copy of a delisted 2012 game playable on

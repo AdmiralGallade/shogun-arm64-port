@@ -39,9 +39,16 @@ final class Leaderboard extends Thread {
      * A file in the app's external directory overrides the built-in value, so
      * a test device can be pointed at a server without rebuilding:
      *
-     *   adb shell "echo https://host/v1/score >      *     /sdcard/Android/data/dev.admiralgallade.shogun64/files/leaderboard.txt"
+     *   adb shell "echo https://host/v1/score >      *     /sdcard/Android/data/dev.admiralgallade.shogun/files/leaderboard.txt"
      */
+    /**
+     * Frozen for the Play release: no endpoint, no override file, no thread.
+     * Flip to true (and add the INTERNET permission) once the server exists.
+     */
+    static final boolean FROZEN = true;
+
     static String endpointFor(android.content.Context ctx) {
+        if (FROZEN) return "";
         try {
             java.io.File dir = ctx.getExternalFilesDir(null);
             if (dir != null) {

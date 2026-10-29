@@ -24,4 +24,8 @@ audio path, Android shell, build tooling.
 | [Keystone](https://github.com/keystone-engine/keystone) | Assembly, used by the APK patcher | GPL-2.0 |
 
 Unicorn is GPL-2.0. It is linked as a shared library and is not redistributed
-here; you build it yourself as part of the setup.
+here; you build it yourself as part of the setup. The Google Play release ships
+`libunicorn.so` built from the unmodified
+[Unicorn 2.1.3 source](https://github.com/unicorn-engine/unicorn/tree/2.1.3),
+the same version `build.sh` fetches; this repository is the source for the rest of
+that release's code.

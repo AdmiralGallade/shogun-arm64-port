@@ -60,6 +60,10 @@ struct App {
   double prev_exec_ms = 0, prev_lock_ms = 0, prev_gl_ms = 0;
   uint64_t lw_at_tick = 0, gl_at_tick = 0;
   uint64_t jolts = 0;
+  // The audio thread's emulation, never reset (audio_exec_ms is per window):
+  // how much of the emulator it took between two ticks.
+  double audio_exec_total = 0, audio_at_tick = 0, prev_audio_ms = 0;
+  uint32_t hitch_lines = 0;      // HITCH lines this window (capped)
   bool audio_armed = false;
 };
 
@@ -203,6 +207,7 @@ Java_net_int13_shogun_ShogunNative_nativeInit(
   }
   shogun::InstallGl(g_app->rt);
   shogun::InstallHardMode(g_app->rt, files);
+  shogun::InstallMissile(g_app->rt, files);
   shogun::InstallLeaderboard(g_app->rt);
   g_app->jni = std::make_unique<shogun::JniBridge>(g_app->rt, env, activity);
 
@@ -274,13 +279,25 @@ Java_net_int13_shogun_ShogunNative_nativeTick(JNIEnv* env, jclass) {
       g_app->gaps++;
       // Two 60 Hz frames: visibly a hitch whatever rate we are pacing to.
       if (gap > 33.0) g_app->gaps_late++;
+      // Any frame past 25 ms, named -- what a "bit of lag" is made of. The
+      // split is the frame before this gap: its tick's emulation, the audio
+      // thread's emulation since (one emulator, taken in turn), the wait for
+      // the emulator lock, and GL. Capped so the logging cannot be the lag.
+      const double audio_gap = g_app->audio_exec_total - g_app->audio_at_tick;
+      if (gap > 25.0 && gap <= 66.0 && g_app->hitch_lines < 20) {
+        g_app->hitch_lines++;
+        LOGW("HITCH %.0f ms frame at tick %llu: %.1f game + %.1f audio emulating, %.1f queueing, %.1f GL",
+             gap, static_cast<unsigned long long>(g_app->ticks), g_app->prev_exec_ms, audio_gap,
+             g_app->prev_lock_ms, g_app->prev_gl_ms);
+      }
       // Four frames' worth is no longer a hitch, it is a jolt. Name where it
       // went rather than letting it average away.
       if (gap > 66.0) {
         g_app->jolts++;
-        LOGW("JOLT %.0f ms frame: %.1f emulating + %.1f queueing + %.1f GL "
+        LOGW("JOLT %.0f ms frame at tick %llu: %.1f emulating (+ %.1f audio) + %.1f queueing + %.1f GL "
              "(%.1f unaccounted)",
-             gap, g_app->prev_exec_ms, g_app->prev_lock_ms, g_app->prev_gl_ms,
+             gap, static_cast<unsigned long long>(g_app->ticks), g_app->prev_exec_ms, audio_gap,
+             g_app->prev_lock_ms, g_app->prev_gl_ms,
              gap - g_app->prev_exec_ms - g_app->prev_lock_ms -
                  g_app->prev_gl_ms);
       }
@@ -292,6 +309,7 @@ Java_net_int13_shogun_ShogunNative_nativeTick(JNIEnv* env, jclass) {
     }
   }
   g_app->last_tick_at = t0;
+  g_app->audio_at_tick = g_app->audio_exec_total;
   if (!GuestCall("Java_net_int13_HalActivity_onTick",
                  {g_app->jni->env_guest(), self}))
     g_app->booted = false;         // stop hammering a dead engine
@@ -386,6 +404,7 @@ Java_net_int13_shogun_ShogunNative_nativeTick(JNIEnv* env, jclass) {
     }
     g_app->exec_at_log = ex; g_app->lock_wait_at_log = lw;
     g_app->tick_exec_ms = 0; g_app->audio_exec_ms = 0;
+    g_app->hitch_lines = 0;
     g_app->worst_tick_exec_ms = 0;
     g_app->stalls = 0; g_app->stall_ms = 0;
     g_app->unpacks = 0; g_app->unpack_bytes = 0;
@@ -462,8 +481,9 @@ Java_net_int13_shogun_ShogunNative_nativeAudio(JNIEnv* env, jclass,
             {g_app->jni->env_guest(), self, hbuf,
              static_cast<uint32_t>(samples)});
   g_app->audio_ms += NowMs() - t0;
-  g_app->audio_exec_ms +=
-      (shogun::Runtime::ExecNsThisThread() - exec0) / 1e6;
+  const double audio_exec = (shogun::Runtime::ExecNsThisThread() - exec0) / 1e6;
+  g_app->audio_exec_ms += audio_exec;
+  g_app->audio_exec_total += audio_exec;
   g_app->audio_calls++;
 }
 
@@ -480,6 +500,20 @@ Java_net_int13_shogun_ShogunNative_nativeLeaderboardPending(JNIEnv* env, jclass)
 JNIEXPORT jboolean JNICALL
 Java_net_int13_shogun_ShogunNative_nativeTakeOpenGithub(JNIEnv*, jclass) {
   return shogun::TakeOpenGithub() ? JNI_TRUE : JNI_FALSE;
+}
+
+// True once, each time the in-game "Report a bug" button is pressed.
+JNIEXPORT jboolean JNICALL
+Java_net_int13_shogun_ShogunNative_nativeTakeBugReport(JNIEnv*, jclass) {
+  return shogun::TakeOpenBugReport() ? JNI_TRUE : JNI_FALSE;
+}
+
+// What the bug report says the player was doing: "level|hard".
+JNIEXPORT jstring JNICALL
+Java_net_int13_shogun_ShogunNative_nativeBugContext(JNIEnv* env, jclass) {
+  const std::string s =
+      shogun::CurrentWorld() + "|" + (shogun::HardModeEnabled() ? "1" : "0");
+  return env->NewStringUTF(s.c_str());
 }
 
 JNIEXPORT jstring JNICALL

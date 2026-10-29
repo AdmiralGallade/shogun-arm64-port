@@ -24,8 +24,12 @@ public final class ShogunNative {
     public static native void nativeSave();
 
     // ---- leaderboard: Java does the HTTPS, native does the engine ----------
-    /** True once per press of the in-game "Source on GitHub" button. */
+    /** True once per press of the in-game "About and source" button. */
     public static native boolean nativeTakeOpenGithub();
+    /** True once per press of the in-game "Report a bug" button. */
+    public static native boolean nativeTakeBugReport();
+    /** "level|hard" for the bug report: the last level set up, and 1 if hard mode is on. */
+    public static native String nativeBugContext();
 
     /** "board
 score" when the game has a score to send, else null. */

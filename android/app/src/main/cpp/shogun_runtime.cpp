@@ -375,23 +375,69 @@ std::string Runtime::CStr(uint32_t addr, size_t limit) {
   return out;
 }
 
+// Blocks tile the heap with no gaps, so a block's neighbours are the ones
+// before and after it in blocks_. A request takes the smallest free block
+// that fits, split when the rest can be a block of its own; a freed block
+// merges with free neighbours, and one that ends at the top gives its room
+// back. (Whole-block reuse without splitting or merging let a 16-byte
+// request take a freed 4 MB texture buffer: a session ran out of the 256 MB
+// after four or five levels.)
 uint32_t Runtime::Malloc(uint32_t n) {
   n = (n + 7u) & ~7u;
   if (!n) n = 8;
-  for (auto& kv : blocks_) {
-    if (kv.second.free && kv.second.size >= n) { kv.second.free = false; return kv.first; }
+  auto f = free_by_size_.lower_bound(n);
+  if (f != free_by_size_.end()) {
+    const uint32_t size = f->first, a = f->second;
+    free_by_size_.erase(f);
+    Block& b = blocks_[a];
+    b.free = false;
+    if (size - n >= 16) {
+      b.size = n;
+      blocks_[a + n] = {size - n, true};
+      free_by_size_.emplace(size - n, a + n);
+    }
+    return a;
   }
   uint32_t a = heap_ptr_;
-  if (a + n > kHeapBase + kHeapSize) return 0;   // caller sees NULL, like malloc
+  if (n > kHeapBase + kHeapSize - a) return 0;   // caller sees NULL, like malloc
   heap_ptr_ += n;
   heap_peak_ = std::max(heap_peak_, heap_ptr_ - kHeapBase);
   blocks_[a] = {n, false};
   return a;
 }
 
+void Runtime::UnindexFree(uint32_t addr, uint32_t size) {
+  auto r = free_by_size_.equal_range(size);
+  for (auto it = r.first; it != r.second; ++it)
+    if (it->second == addr) { free_by_size_.erase(it); return; }
+}
+
 void Runtime::Free(uint32_t a) {
   auto it = blocks_.find(a);
-  if (it != blocks_.end()) it->second.free = true;
+  if (it == blocks_.end() || it->second.free) return;
+  uint32_t size = it->second.size;
+  auto next = std::next(it);
+  if (next != blocks_.end() && next->second.free) {
+    UnindexFree(next->first, next->second.size);
+    size += next->second.size;
+    blocks_.erase(next);
+  }
+  if (it != blocks_.begin()) {
+    auto prev = std::prev(it);
+    if (prev->second.free) {
+      UnindexFree(prev->first, prev->second.size);
+      size += prev->second.size;
+      blocks_.erase(it);
+      it = prev;
+    }
+  }
+  if (it->first + size == heap_ptr_) {          // the top: give it back
+    heap_ptr_ = it->first;
+    blocks_.erase(it);
+    return;
+  }
+  it->second = {size, true};
+  free_by_size_.emplace(size, it->first);
 }
 
 uint32_t Runtime::AllocScratch(uint32_t n) {

@@ -1,13 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="dev.admiralgallade.shogun64"
-    android:versionCode="10204" android:versionName="1.2.4-arm64">
+    package="dev.admiralgallade.shogun"
+    android:versionCode="10300" android:versionName="1.3.0">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36" />
   <uses-feature android:glEsVersion="0x00010001" android:required="true" />
+  <!-- The bug report lists the email apps; Android hides other apps otherwise. -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.SENDTO" />
+      <data android:scheme="mailto" />
+    </intent>
+  </queries>
   <application android:label="@string/app_name" android:hasCode="true"
                android:icon="@mipmap/ic_launcher"
                android:roundIcon="@mipmap/ic_launcher"
-               android:allowBackup="false" android:extractNativeLibs="true">
+               android:allowBackup="true"
+               android:fullBackupContent="@xml/backup_rules"
+               android:dataExtractionRules="@xml/data_extraction_rules"
+               android:appCategory="game"
+               android:extractNativeLibs="true">
     <activity android:name="net.int13.shogun.ShogunActivity"
               android:label="@string/app_name"
               android:icon="@mipmap/ic_launcher"
@@ -22,5 +33,10 @@
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+    <!-- Lends the bug report's log to the email app the player picks. -->
+    <provider android:name="net.int13.shogun.BugReportProvider"
+              android:authorities="dev.admiralgallade.shogun.bugreport"
+              android:exported="false"
+              android:grantUriPermissions="true" />
   </application>
 </manifest>

@@ -12,8 +12,9 @@
 #   2. fetch and build Unicorn for arm64-v8a (once; cached afterwards)
 #   3. extract the engine and asset pack from your APK, patch the changelog,
 #      rebuild the launcher icon
-#   4. build the native runtime
-#   5. package and sign the APK
+#   4. build the new weapons, missions and bosses (missile/build.py)
+#   5. build the native runtime
+#   6. package and sign the APK
 set -euo pipefail
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
@@ -160,7 +161,20 @@ fi
 say "Extracting the engine and asset pack from your APK"
 "$PY" "$ROOT/tools/extract_assets.py" "$APK_IN"
 
-# ------------------------------------------------------------------ 4. runtime
+# ------------------------------------------------------------------ 4. missile
+# The guest code for the new weapons, missions and bosses, compiled for the
+# game's ARM32 and linked into libshogun.so as missile_blob.h. Its weapon
+# buttons are cut from the game's own HUD sheet, so they are not in this
+# repository: make them from your copy first (missile/make_icon.py, then
+# missile/make_upgrades.py).
+say "Building the game patches"
+for t in weapon_m weapon_e_up weapon_e_down weapon_p_up weapon_p_down weapon_sh_up weapon_sh_down; do
+  [ -f "$ROOT/missile/$t.tga" ] || die "missile/$t.tga is missing: run missile/make_icon.py on the game's common/hud/weapons_buttons_thin.tga, then missile/make_upgrades.py"
+done
+"$PY" "$ROOT/missile/build.py" >/dev/null
+ok "missile_blob.h"
+
+# ------------------------------------------------------------------ 5. runtime
 say "Building the native runtime"
 CPP="$ROOT/android/app/src/main/cpp"
 cmake -S "$CPP" -B "$CPP/build" "${GEN[@]}" \
@@ -171,15 +185,19 @@ cmake -S "$CPP" -B "$CPP/build" "${GEN[@]}" \
 cmake --build "$CPP/build" -j >/dev/null
 ok "libshogun.so"
 
-# ------------------------------------------------------------------ 5. package
+# ------------------------------------------------------------------ 6. package
 say "Packaging"
+LLVM_STRIP="$(ls "$NDK"/toolchains/llvm/prebuilt/*/bin/llvm-strip* 2>/dev/null | head -1)"
+export LLVM_STRIP
 "$ROOT/android/build-apk.sh" >/dev/null
 APK_OUT="$ROOT/android/shogun-arm64.apk"
 [ -f "$APK_OUT" ] || die "build-apk.sh did not produce an APK"
 
 # The one check worth never skipping: that the APK contains the runtime just
 # built. A silently stale APK looks exactly like a fix that did not work.
-"$PY" - "$APK_OUT" "$CPP/build/libshogun.so" <<'PYEOF'
+# build-apk.sh ships it stripped, so compare against a stripped copy.
+"$LLVM_STRIP" --strip-unneeded -o "$CPP/build/libshogun.stripped.so" "$CPP/build/libshogun.so"
+"$PY" - "$APK_OUT" "$CPP/build/libshogun.stripped.so" <<'PYEOF'
 import sys, zipfile
 a = zipfile.ZipFile(sys.argv[1]).read('lib/arm64-v8a/libshogun.so')
 b = open(sys.argv[2], 'rb').read()

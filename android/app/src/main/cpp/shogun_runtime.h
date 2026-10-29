@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <map>
 #include <condition_variable>
 #include <mutex>
 #include <string>
@@ -168,9 +169,12 @@ class Runtime {
   std::vector<TrapRegion> trap_regions_;
   std::unordered_map<uint32_t, ShimFn> watches_;
 
-  // heap: first-fit with a free list, matching the Python allocator
+  // heap: blocks tile [kHeapBase, heap_ptr_); best fit with splitting,
+  // freed blocks merge with free neighbours (Malloc), as runtime/guest.py
   struct Block { uint32_t size; bool free; };
-  std::unordered_map<uint32_t, Block> blocks_;
+  std::map<uint32_t, Block> blocks_;                  // by address
+  std::multimap<uint32_t, uint32_t> free_by_size_;    // size -> address
+  void UnindexFree(uint32_t addr, uint32_t size);
   uint32_t heap_ptr_ = kHeapBase, heap_peak_ = 0;
   uint32_t scratch_ = 0, scratch_end_ = 0, errno_addr_ = 0;
   uint32_t exidx_base_ = 0, exidx_count_ = 0;

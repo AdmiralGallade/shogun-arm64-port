@@ -90,6 +90,12 @@ void RegisterAssetFd(int fd, FILE* f);
 void InstallHardMode(Runtime& rt, const std::string& files_dir);
 uint32_t CurrentShogun();
 bool TakeOpenGithub();
+bool TakeOpenBugReport();
+std::string CurrentWorld();
+
+// The M (missile) weapon: maps a guest-code blob and redirects the weapon
+// and menu call sites into it (missile.cpp, built by missile/build.py).
+bool InstallMissile(Runtime& rt, const std::string& files_dir);
 
 // Leaderboard: the port does the networking, the engine renders the result
 // (leaderboard.cpp).
